@@ -1,0 +1,83 @@
+# Docket — create a compensating pull request from one successful deployment.
+#
+# The workflow only creates Git objects and a PR. Salesforce credentials are
+# deliberately absent: validation, manual merge, and deployment happen through
+# the ordinary Docket validate/deploy workflows.
+name: Docket rollback PR
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Workflow run ID that holds the successful deployment artifact
+        required: true
+        type: number
+      artifact_name:
+        description: Exact docket-deployment-* artifact name from that run
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+env:
+  # The exact engine this repository trusts. Never a bare package name: the
+  # public `docket` package on npm is something else entirely.
+  DOCKET_PACKAGE: ${{ vars.DOCKET_PACKAGE }}
+  DOCKET: docket
+
+jobs:
+  propose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install the pinned Docket engine
+        run: |
+          set -euo pipefail
+          if [ -z "${DOCKET_PACKAGE:-}" ]; then
+            echo "Set the DOCKET_PACKAGE repository variable to the exact Docket engine this repository trusts." >&2
+            exit 1
+          fi
+          npm install --global "$DOCKET_PACKAGE"
+
+      - name: Retrieve the exact recorded deployment
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: ${{ runner.temp }}/docket-source
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Build one inverse commit and open its pull request
+        env:
+          # A GitHub App installation token or fine-grained PAT makes the
+          # resulting pull_request workflow run automatically. The repository
+          # GITHUB_TOKEN fallback is safe, but GitHub may require a maintainer
+          # to approve the generated validation run.
+          GITHUB_TOKEN: ${{ secrets.DOCKET_PR_TOKEN || github.token }}
+        run: |
+          $DOCKET rollback \
+            --repo "$GITHUB_WORKSPACE" \
+            --repository "$GITHUB_REPOSITORY" \
+            --run "$RUNNER_TEMP/docket-source" \
+            --create-pr \
+            --out "$RUNNER_TEMP/docket-rollback"
+
+      - name: Upload the reviewable rollback calculation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docket-rollback-${{ github.run_id }}
+          path: ${{ runner.temp }}/docket-rollback
+          if-no-files-found: warn

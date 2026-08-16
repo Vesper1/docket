@@ -1,0 +1,186 @@
+# Docket — validate a pull request against the QA org.
+#
+# Copy into `.github/workflows/` of the Salesforce repository. The check this
+# publishes (`docket/validate`) is what branch protection must require: it is
+# the only thing that can gate the native Merge button.
+#
+# Two things must be configured before this workflow is safe to enable.
+#
+# 1. `DOCKET_PACKAGE` — a repository variable naming the exact engine to
+#    install. There is an unrelated public `docket` package on npm, so this is
+#    never `npx docket`: pin a git URL at a full commit SHA, a private tarball,
+#    or a vendored path.
+#
+# 2. Required reviewers on the `qa` GitHub Environment. A `pull_request` event
+#    runs the workflow file *from the pull request*, so an unmerged change can
+#    rewrite the steps below — including the ones that hold
+#    `secrets.DOCKET_SF_AUTH_URL`. Docket reads `docket.yml` and every
+#    privileged hook from the trusted base commit, but it cannot defend the
+#    workflow file that invokes it. The environment approval is what stops a
+#    candidate commit from reaching the credential; `environment: qa` alone
+#    only names the environment, it does not gate anything.
+name: Docket validate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+# One validation per pull request. A new push makes the previous answer
+# obsolete, so cancelling it is correct here — unlike a deployment.
+concurrency:
+  group: docket-validate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  # The exact engine this repository trusts. Never a bare package name.
+  DOCKET_PACKAGE: ${{ vars.DOCKET_PACKAGE }}
+  DOCKET: docket
+  DOCKET_ENVIRONMENT: qa
+
+jobs:
+  gates:
+    permissions:
+      contents: read
+    # Forks and drafts are refused by the engine too; skipping them here keeps
+    # a fork's pull request from ever reaching a job that holds credentials.
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the exact head commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          # Candidate commands must not inherit checkout's repository token.
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install the pinned Docket engine
+        run: |
+          set -euo pipefail
+          if [ -z "${DOCKET_PACKAGE:-}" ]; then
+            echo "Set the DOCKET_PACKAGE repository variable to the exact Docket engine this repository trusts." >&2
+            exit 1
+          fi
+          npm install --global "$DOCKET_PACKAGE"
+
+      - name: Run candidate gates without deployment credentials
+        run: |
+          $DOCKET gates \
+            --repo "$GITHUB_WORKSPACE" \
+            --repository "$GITHUB_REPOSITORY" \
+            --pull-request "${{ github.event.pull_request.number }}" \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --head "${{ github.event.pull_request.head.sha }}" \
+            --target-branch "${{ github.event.pull_request.base.ref }}" \
+            --environment "$DOCKET_ENVIRONMENT" \
+            --out "$RUNNER_TEMP/docket-gates"
+
+      - name: Upload the gate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docket-gates-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/docket-gates
+          if-no-files-found: error
+
+  validate:
+    needs: gates
+    permissions:
+      contents: read
+      actions: read
+      checks: write
+    runs-on: ubuntu-latest
+    # The Salesforce credential enters only after the candidate gate job ended.
+    environment: qa
+    steps:
+      - name: Check out the exact head commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install the pinned Docket engine
+        run: |
+          set -euo pipefail
+          if [ -z "${DOCKET_PACKAGE:-}" ]; then
+            echo "Set the DOCKET_PACKAGE repository variable to the exact Docket engine this repository trusts." >&2
+            exit 1
+          fi
+          npm install --global "$DOCKET_PACKAGE"
+
+      - name: Retrieve the passing gate evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: docket-gates-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/docket-gates
+
+      - name: Install the Salesforce CLI
+        run: npm install --global @salesforce/cli
+
+      - name: Authenticate to the QA org
+        env:
+          SF_AUTH_URL: ${{ secrets.DOCKET_SF_AUTH_URL }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$SF_AUTH_URL" > "$RUNNER_TEMP/auth.txt"
+          sf org login sfdx-url --sfdx-url-file "$RUNNER_TEMP/auth.txt" --alias docket-qa
+          rm -f "$RUNNER_TEMP/auth.txt"
+
+      # The verdict is data, not a step failure: the artifacts and the check
+      # must be published whichever way it went.
+      - name: Validate
+        id: validate
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # §4: the run states its own retention window rather than leaving a
+          # later audit to assume the evidence is permanent.
+          expires_at=$(date -u -d "+${GITHUB_RETENTION_DAYS:-90} days" +%Y-%m-%dT%H:%M:%S.000Z)
+          $DOCKET validate \
+            --repository "$GITHUB_REPOSITORY" \
+            --pull-request "${{ github.event.pull_request.number }}" \
+            --environment "$DOCKET_ENVIRONMENT" \
+            --gates-run "$RUNNER_TEMP/docket-gates" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --artifacts-expire-at "$expires_at" \
+            --out "$RUNNER_TEMP/docket-run"
+
+      - name: Upload the validated plan
+        uses: actions/upload-artifact@v4
+        with:
+          # The exact PR and head SHA, so a deployment can only ever pick up
+          # the artifacts of the change it is deploying.
+          name: docket-validation-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/docket-run
+          if-no-files-found: error
+
+      - name: Publish the required check
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $DOCKET publish-check \
+            --repository "$GITHUB_REPOSITORY" \
+            --validated-run "$RUNNER_TEMP/docket-run" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --details-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      - name: Fail the job when validation failed
+        if: steps.validate.outcome != 'success'
+        run: exit 1

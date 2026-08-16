@@ -1,0 +1,35 @@
+{
+  "name": "docket",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Code-first deployment pipelines for Salesforce",
+  "license": "UNLICENSED",
+  "type": "module",
+  "bin": {
+    "docket": "./dist/bin/docket.js"
+  },
+  "files": [
+    "dist",
+    "templates"
+  ],
+  "packageManager": "pnpm@11.15.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "docket": "node src/bin/docket.ts",
+    "prepack": "pnpm build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "yaml": "^2.9.0"
+  }
+}

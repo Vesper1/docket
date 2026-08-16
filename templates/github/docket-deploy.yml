@@ -1,0 +1,191 @@
+# Docket — deploy the validated plan after the pull request is merged.
+#
+# Copy into `.github/workflows/` of the Salesforce repository. This workflow
+# never builds a plan: it retrieves the one whose validation produced the green
+# check and deploys exactly that.
+#
+# Needs the same two things as `docket-validate.yml`: a `DOCKET_PACKAGE`
+# repository variable pinning the exact engine, and protection rules on the
+# `qa` GitHub Environment. The workflow file that runs here is the merged one,
+# so it was reviewed — but the credential still belongs to the environment, not
+# to this file.
+name: Docket deploy
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  # Reading the artifacts of the originating validation run.
+  actions: read
+  checks: read
+
+env:
+  # The exact engine this repository trusts. Never a bare package name.
+  DOCKET_PACKAGE: ${{ vars.DOCKET_PACKAGE }}
+  DOCKET: docket
+  DOCKET_ENVIRONMENT: qa
+
+jobs:
+  # Which validation run may be deployed, and to which org. Both answers come
+  # from the check that gated the merge, not from this event.
+  locate:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    outputs:
+      run_id: ${{ steps.locate.outputs.run_id }}
+      plan_identity: ${{ steps.locate.outputs.plan_identity }}
+      org_id: ${{ steps.plan.outputs.org_id }}
+      completion_runs: ${{ steps.completions.outputs.run_ids }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install the pinned Docket engine
+        run: |
+          set -euo pipefail
+          if [ -z "${DOCKET_PACKAGE:-}" ]; then
+            echo "Set the DOCKET_PACKAGE repository variable to the exact Docket engine this repository trusts." >&2
+            exit 1
+          fi
+          npm install --global "$DOCKET_PACKAGE"
+
+      - name: Find the validation run behind the green check
+        id: locate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          $DOCKET locate-run \
+            --repository "$GITHUB_REPOSITORY" \
+            --head "${{ github.event.pull_request.head.sha }}" \
+            --json > "$RUNNER_TEMP/docket-origin.json"
+          jq -r '"run_id=\(.data.originating.workflowRunId)"' "$RUNNER_TEMP/docket-origin.json" >> "$GITHUB_OUTPUT"
+          jq -r '"plan_identity=\(.data.originating.planIdentity)"' "$RUNNER_TEMP/docket-origin.json" >> "$GITHUB_OUTPUT"
+
+      - name: Retrieve that run's artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: docket-validation-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/docket-run
+          run-id: ${{ steps.locate.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify the bundle and read its target org
+        id: plan
+        run: |
+          set -euo pipefail
+          $DOCKET inspect-run \
+            --run "$RUNNER_TEMP/docket-run" \
+            --expected-plan-identity "${{ steps.locate.outputs.plan_identity }}" \
+            --json > "$RUNNER_TEMP/docket-recorded.json"
+          org_id=$(jq -r '.data.run.plan.target.orgId' "$RUNNER_TEMP/docket-recorded.json")
+          echo "org_id=$org_id" >> "$GITHUB_OUTPUT"
+
+      - name: Locate immutable manual-step completions
+        id: completions
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_ids=$($DOCKET locate-steps \
+            --repository "$GITHUB_REPOSITORY" \
+            --validated-run "$RUNNER_TEMP/docket-run" \
+            --json | jq -c '[.data.origins[].workflowRunId]')
+          echo "run_ids=$run_ids" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: locate
+    runs-on: ubuntu-latest
+    environment: qa
+    # One deployment at a time per Salesforce org. Never cancel-in-progress: a
+    # deployment that is already changing an org must be allowed to finish. The
+    # group is released when the job ends, including on failure and cancellation.
+    concurrency:
+      group: docket-deploy-${{ needs.locate.outputs.org_id }}
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - name: Check out the exact validated commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install the pinned Docket engine
+        run: |
+          set -euo pipefail
+          if [ -z "${DOCKET_PACKAGE:-}" ]; then
+            echo "Set the DOCKET_PACKAGE repository variable to the exact Docket engine this repository trusts." >&2
+            exit 1
+          fi
+          npm install --global "$DOCKET_PACKAGE"
+
+      - name: Install the Salesforce CLI
+        run: npm install --global @salesforce/cli
+
+      - name: Authenticate to the QA org
+        env:
+          SF_AUTH_URL: ${{ secrets.DOCKET_SF_AUTH_URL }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$SF_AUTH_URL" > "$RUNNER_TEMP/auth.txt"
+          sf org login sfdx-url --sfdx-url-file "$RUNNER_TEMP/auth.txt" --alias docket-qa
+          rm -f "$RUNNER_TEMP/auth.txt"
+
+      - name: Retrieve the validated plan
+        uses: actions/download-artifact@v4
+        with:
+          name: docket-validation-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/docket-run
+          run-id: ${{ needs.locate.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Retrieve immutable manual-step completions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMPLETION_RUNS: ${{ needs.locate.outputs.completion_runs }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/docket-steps"
+          echo "$COMPLETION_RUNS" | jq -r '.[]' | while IFS= read -r run_id; do
+            gh run download "$run_id" \
+              --repo "$GITHUB_REPOSITORY" \
+              --name "docket-step-$run_id" \
+              --dir "$RUNNER_TEMP/docket-steps"
+          done
+
+      - name: Deploy exactly what was validated
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          expires_at=$(date -u -d "+${GITHUB_RETENTION_DAYS:-90} days" +%Y-%m-%dT%H:%M:%S.000Z)
+          $DOCKET deploy \
+            --repository "$GITHUB_REPOSITORY" \
+            --pull-request "${{ github.event.pull_request.number }}" \
+            --validated-run "$RUNNER_TEMP/docket-run" \
+            --expected-plan-identity "${{ needs.locate.outputs.plan_identity }}" \
+            --steps "$RUNNER_TEMP/docket-steps" \
+            --require-merged \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --artifacts-expire-at "$expires_at" \
+            --out "$RUNNER_TEMP/docket-deploy"
+
+      # A deployment that failed after the merge is the case §5 warns about:
+      # the merge stands, so the evidence has to survive for the fix or revert
+      # pull request that follows.
+      - name: Upload the deployment record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docket-deployment-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/docket-deploy
+          if-no-files-found: warn

@@ -1,0 +1,68 @@
+# Docket — rebuild a bounded deployment history from retained run artifacts.
+#
+# Supply exact Docket deploy workflow run IDs. This is an audit projection, not
+# a database: expired or omitted artifacts are outside the resulting history.
+name: Docket deployment history
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_ids:
+        description: JSON array of Docket deploy workflow run IDs
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  # The exact engine this repository trusts. Never a bare package name: the
+  # public `docket` package on npm is something else entirely.
+  DOCKET_PACKAGE: ${{ vars.DOCKET_PACKAGE }}
+  DOCKET: docket
+
+jobs:
+  history:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install the pinned Docket engine
+        run: |
+          set -euo pipefail
+          if [ -z "${DOCKET_PACKAGE:-}" ]; then
+            echo "Set the DOCKET_PACKAGE repository variable to the exact Docket engine this repository trusts." >&2
+            exit 1
+          fi
+          npm install --global "$DOCKET_PACKAGE"
+
+      - name: Retrieve the exact deployment artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_IDS: ${{ inputs.run_ids }}
+        run: |
+          set -euo pipefail
+          echo "$RUN_IDS" | jq -e 'type == "array" and length > 0 and all(.[]; type == "number" and . > 0 and floor == .)' > /dev/null
+          mkdir -p "$RUNNER_TEMP/docket-history-input"
+          echo "$RUN_IDS" | jq -r '.[]' | while IFS= read -r run_id; do
+            gh run download "$run_id" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern 'docket-deployment-*' \
+              --dir "$RUNNER_TEMP/docket-history-input/$run_id"
+          done
+
+      - name: Verify every bundle and build the history
+        run: |
+          $DOCKET history \
+            --runs "$RUNNER_TEMP/docket-history-input" \
+            --out "$RUNNER_TEMP/docket-history"
+
+      - name: Upload the bounded history projection
+        uses: actions/upload-artifact@v4
+        with:
+          name: docket-history-${{ github.run_id }}
+          path: ${{ runner.temp }}/docket-history
+          if-no-files-found: error

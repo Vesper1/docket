@@ -1,0 +1,4 @@
+interface:
+  display_name: "TypeScript Structure Review"
+  short_description: "Review TypeScript project file structure"
+  default_prompt: "Use $review-typescript-structure to audit this TypeScript project file layout and module boundaries."

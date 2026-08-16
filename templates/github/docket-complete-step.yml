@@ -1,0 +1,107 @@
+# Docket — explicitly complete one manual pre-deployment step.
+#
+# This file must live on the default branch for GitHub to expose Run workflow.
+# Dispatch requires repository write access; Docket binds the result to the
+# exact validated plan and updates only its existing pending check.
+name: Docket complete manual step
+
+on:
+  workflow_dispatch:
+    inputs:
+      pull_request:
+        description: Pull request number
+        required: true
+        type: number
+      step:
+        description: Manual step name from trusted docket.yml
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  checks: write
+
+env:
+  # The exact engine this repository trusts. Never a bare package name: the
+  # public `docket` package on npm is something else entirely.
+  DOCKET_PACKAGE: ${{ vars.DOCKET_PACKAGE }}
+  DOCKET: docket
+
+jobs:
+  complete:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install the pinned Docket engine
+        run: |
+          set -euo pipefail
+          if [ -z "${DOCKET_PACKAGE:-}" ]; then
+            echo "Set the DOCKET_PACKAGE repository variable to the exact Docket engine this repository trusts." >&2
+            exit 1
+          fi
+          npm install --global "$DOCKET_PACKAGE"
+
+      - name: Read the current pull-request head
+        id: pull
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DOCKET_PR: ${{ inputs.pull_request }}
+        run: |
+          set -euo pipefail
+          head_sha=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$DOCKET_PR" --jq '.head.sha')
+          echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Find the validation run behind the green check
+        id: locate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_id=$($DOCKET locate-run \
+            --repository "$GITHUB_REPOSITORY" \
+            --head "${{ steps.pull.outputs.head_sha }}")
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Retrieve the exact validated plan
+        uses: actions/download-artifact@v4
+        with:
+          name: docket-validation-${{ inputs.pull_request }}-${{ steps.pull.outputs.head_sha }}
+          path: ${{ runner.temp }}/docket-run
+          run-id: ${{ steps.locate.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Record the completion before publishing it
+        env:
+          DOCKET_STEP: ${{ inputs.step }}
+        run: |
+          $DOCKET complete-step \
+            --validated-run "$RUNNER_TEMP/docket-run" \
+            --step "$DOCKET_STEP" \
+            --by "$GITHUB_ACTOR" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --steps "$RUNNER_TEMP/docket-steps"
+
+      - name: Upload the immutable completion
+        uses: actions/upload-artifact@v4
+        with:
+          name: docket-step-${{ github.run_id }}
+          path: ${{ runner.temp }}/docket-steps
+          if-no-files-found: error
+
+      - name: Complete the existing required check
+        env:
+          DOCKET_STEP: ${{ inputs.step }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $DOCKET complete-step \
+            --repository "$GITHUB_REPOSITORY" \
+            --validated-run "$RUNNER_TEMP/docket-run" \
+            --step "$DOCKET_STEP" \
+            --by "$GITHUB_ACTOR" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --steps "$RUNNER_TEMP/docket-steps" \
+            --details-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
