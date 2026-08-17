@@ -9,7 +9,7 @@ import { describe, expect, test } from 'vitest';
  * check gate a merge and a merge start a deployment. These checks are
  * structural — only a real Actions run can prove GitHub agrees.
  */
-const TEMPLATES = new URL('../../../../templates/github/', import.meta.url);
+const TEMPLATES = new URL('../../templates/github/', import.meta.url);
 
 async function workflow(name: string): Promise<Record<string, any>> {
 	const path = fileURLToPath(new URL(name, TEMPLATES));
@@ -244,5 +244,52 @@ describe('the deployment-history workflow', () => {
 		expect(download.run).toContain('--pattern \'docket-deployment-*\'');
 		expect(build.run).toContain('--runs "$RUNNER_TEMP/docket-history-input"');
 		expect(JSON.stringify(history)).not.toMatch(/sqlite|postgres|database[_-]url/i);
+	});
+});
+
+/**
+ * Every workflow starts by installing the engine, and each of them is trusted
+ * to install the same one. A step that installed something else — or that
+ * needed a credential to do it, next to the candidate commands that run
+ * afterwards — would undo the guarantees the rest of this file checks.
+ */
+describe('the pinned engine install', () => {
+	const TEMPLATE_NAMES = [
+		'docket-validate.yml',
+		'docket-deploy.yml',
+		'docket-complete-step.yml',
+		'docket-rollback.yml',
+		'docket-history.yml',
+	];
+
+	async function installSteps(name: string): Promise<any[]> {
+		const { jobs } = await workflow(name);
+		return Object.values(jobs as Record<string, any>)
+			.flatMap((job: any) => (job.steps ?? []) as any[])
+			.filter((step) => String(step.run ?? '').includes('npm install --global "$DOCKET_PACKAGE"'));
+	}
+
+	test.each(TEMPLATE_NAMES)('%s refuses to run before DOCKET_PACKAGE names an engine', async (name) => {
+		const steps = await installSteps(name);
+
+		expect(steps.length).toBeGreaterThan(0);
+		for (const step of steps) {
+			expect(step.run).toContain('if [ -z "${DOCKET_PACKAGE:-}" ]');
+			expect(step.run).toContain('exit 1');
+		}
+	});
+
+	test.each(TEMPLATE_NAMES)('%s installs the engine without holding a secret', async (name) => {
+		const steps = await installSteps(name);
+
+		for (const step of steps) {
+			// A public package needs no credential, and the gate job runs
+			// candidate commands right after this step: a token here would be
+			// readable by them for the rest of the job.
+			expect(step.env).toBeUndefined();
+			expect(step.run).toContain('npm install --global "$DOCKET_PACKAGE"\n');
+			expect(step.run).not.toContain('_authToken');
+			expect(step.run).not.toContain('NPM_CONFIG_USERCONFIG');
+		}
 	});
 });

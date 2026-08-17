@@ -1,9 +1,15 @@
 {
-  "name": "docket",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@vesper1/docket",
+  "version": "0.1.0",
   "description": "Code-first deployment pipelines for Salesforce",
   "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Vesper1/docket.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "bin": {
     "docket": "./dist/bin/docket.js"
@@ -19,8 +25,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "docket": "node src/bin/docket.ts",
-    "prepack": "pnpm build",
+    "prepack": "npm run build",
     "test": "vitest run",
+    "test:unit": "vitest run src/lib",
+    "test:fixture": "vitest run src/tests",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },

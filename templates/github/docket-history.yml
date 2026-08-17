@@ -30,6 +30,9 @@ jobs:
         with:
           node-version: '24'
 
+      # The engine is a public package, so this step needs no credential at
+      # all. That is deliberate: in the gate job it runs beside
+      # candidate-controlled commands.
       - name: Install the pinned Docket engine
         run: |
           set -euo pipefail
