@@ -6,6 +6,7 @@ import { docketError, ErrorCode } from '../../shared/result/docket-error.ts';
 import type { DocketError } from '../../shared/result/docket-error.ts';
 import { err, ok } from '../../shared/result/result.ts';
 import type { Result } from '../../shared/result/result.ts';
+import { compareText } from '../../shared/text/compare-text.ts';
 import { readRecordedRun } from '../run/read-artifacts.ts';
 import type { RunRecord } from '../run/run-record.ts';
 import { findSecrets } from '../run/secret-scan.ts';
@@ -273,6 +274,3 @@ function invalid(problem: string): DocketError {
 	return docketError(ErrorCode.historyInvalid, `cannot build deployment history: ${problem}`);
 }
 
-function compareText(left: string, right: string): number {
-	return left === right ? 0 : left < right ? -1 : 1;
-}

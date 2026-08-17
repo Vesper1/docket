@@ -5,7 +5,7 @@ import { describe, expect, test } from 'vitest';
 
 import { ExitCode } from '../lib/features/cli/exit-code.ts';
 
-const entryPoint = fileURLToPath(new URL('./docket.ts', import.meta.url));
+const entryPoint = fileURLToPath(new URL('../bin/docket.ts', import.meta.url));
 
 /** Runs the real binary in a real process, so the exit code is the real one. */
 function docket(...args: string[]) {

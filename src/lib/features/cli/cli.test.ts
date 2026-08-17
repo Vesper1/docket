@@ -1,7 +1,5 @@
-import { afterEach, describe, expect, test } from 'vitest';
+import { describe, expect, test } from 'vitest';
 
-import { createGitFixture } from '../git/testing/git-fixture.ts';
-import type { GitFixture } from '../git/testing/git-fixture.ts';
 import { runCli } from './cli.ts';
 import { ExitCode } from './exit-code.ts';
 
@@ -34,6 +32,15 @@ describe('valid invocations succeed', () => {
 
 		expect(outcome.exitCode).toBe(ExitCode.success);
 		expect(outcome.stdout).toContain('Usage: docket <command> [options]');
+	});
+
+	test("a command prints its own options, and not another command's", async () => {
+		const outcome = await runCli(['rollback', '--help'], context);
+
+		expect(outcome.exitCode).toBe(ExitCode.success);
+		expect(outcome.stdout).toContain('Usage: docket rollback [options]');
+		expect(outcome.stdout).toContain('--create-pr');
+		expect(outcome.stdout).not.toContain('--gates-run');
 	});
 });
 
@@ -106,93 +113,83 @@ describe('--json output', () => {
 	});
 });
 
-describe('docket changes', () => {
-	const CLASS = 'force-app/main/default/classes/Bar.cls';
-	let fixture: GitFixture | undefined;
+/**
+ * A flag is owned by the command that declares it. A recognised option handed
+ * to an unrelated command is an operator mistake — the ref, the directory or
+ * the org they meant is somewhere else — so it stops the run instead of being
+ * parsed and quietly ignored.
+ */
+describe("another command's flag is refused", () => {
+	const BASE = 'a'.repeat(40);
+	const HEAD = 'b'.repeat(40);
 
-	afterEach(async () => {
-		await fixture?.remove();
-		fixture = undefined;
-	});
-
-	async function repository(): Promise<GitFixture> {
-		return createGitFixture({
-			base: { 'force-app/main/default/classes/Foo.cls': 'public class Foo {}' },
-			head: {
-				'force-app/main/default/classes/Foo.cls': 'public class Foo {}',
-				[CLASS]: 'public class Bar {}',
-			},
-		});
-	}
-
-	test('lists the changes between the two given commits', async () => {
-		fixture = await repository();
-
-		const outcome = await runCli(
-			['changes', '--repo', fixture.directory, '--base', fixture.baseSha, '--head', fixture.headSha],
-			context,
-		);
-
-		expect(outcome.exitCode).toBe(ExitCode.success);
-		expect(outcome.stdout).toBe(`added    ${CLASS}\n`);
-	});
-
-	test('an unknown ref exits non-zero and produces no listing', async () => {
-		fixture = await repository();
-
-		const outcome = await runCli(
-			['changes', '--repo', fixture.directory, '--base', fixture.baseSha, '--head', 'f'.repeat(40)],
-			context,
-		);
-
-		expect(outcome.exitCode).not.toBe(ExitCode.success);
-		expect(outcome.stdout).toBe('');
-		expect(outcome.stderr).toContain('git diff failed');
-	});
-
-	test('an unknown ref in JSON mode carries a code and no changes', async () => {
-		fixture = await repository();
-
-		const outcome = await runCli(
-			[
-				'changes',
-				'--json',
-				'--repo',
-				fixture.directory,
-				'--base',
-				'0000000000000000000000000000000000000000',
-				'--head',
-				fixture.headSha,
-			],
-			context,
-		);
-
-		expect(outcome.exitCode).not.toBe(ExitCode.success);
-		const payload = JSON.parse(outcome.stdout);
-		expect(payload.ok).toBe(false);
-		expect(payload.error.code).toBe('git_failed');
-		expect(payload.data).toBeUndefined();
-	});
-
-	test('a missing ref option is refused instead of guessed', async () => {
-		fixture = await repository();
-
-		const outcome = await runCli(['changes', '--repo', fixture.directory, '--base', fixture.baseSha], context);
+	test('changes does not take the rollback flag', async () => {
+		const outcome = await runCli(['changes', '--base', BASE, '--head', HEAD, '--create-pr'], context);
 
 		expect(outcome.exitCode).toBe(ExitCode.usage);
 		expect(outcome.stdout).toBe('');
-		expect(outcome.stderr).toContain('--head');
+		expect(outcome.stderr).toContain('--create-pr');
+		expect(outcome.stderr).toContain('changes');
 	});
 
-	test('--repo defaults to where the process was started', async () => {
-		fixture = await repository();
+	test('plan does not take the manual-step flags', async () => {
+		const outcome = await runCli(['plan', '--environment', 'qa', '--step', 'seed-data'], context);
 
-		const outcome = await runCli(['changes', '--base', fixture.baseSha, '--head', fixture.headSha], {
-			...context,
-			cwd: fixture.directory,
+		expect(outcome.exitCode).toBe(ExitCode.usage);
+		expect(outcome.stdout).toBe('');
+		expect(outcome.stderr).toContain('--step');
+	});
+
+	test('history does not take a validation flag', async () => {
+		const outcome = await runCli(['history', '--runs', '.docket', '--gates-run', '.docket/gates'], context);
+
+		expect(outcome.exitCode).toBe(ExitCode.usage);
+		expect(outcome.stderr).toContain('--gates-run');
+	});
+
+	test('state-audit takes no options of its own', async () => {
+		const outcome = await runCli(['state-audit', '--repo', '.'], context);
+
+		expect(outcome.exitCode).toBe(ExitCode.usage);
+		expect(outcome.stderr).toContain('--repo');
+	});
+
+	test('the refusal is an invalid_option envelope in JSON mode', async () => {
+		const outcome = await runCli(['plan', '--step', 'seed-data', '--json'], context);
+
+		expect(outcome.exitCode).toBe(ExitCode.usage);
+		expect(JSON.parse(outcome.stdout).error.code).toBe('invalid_option');
+	});
+
+	test('a command still accepts the flags it does declare', async () => {
+		const outcome = await runCli(['rollback', '--create-pr', '--json'], context);
+
+		// It gets as far as asking for the run it should invert, which is the
+		// proof the flag itself was accepted.
+		expect(JSON.parse(outcome.stdout).error).toEqual({
+			code: 'missing_option',
+			message: 'missing required option: --run',
 		});
+	});
+
+	test('the global flags stay available to every command', async () => {
+		const outcome = await runCli(['state-audit', '--json'], context);
 
 		expect(outcome.exitCode).toBe(ExitCode.success);
-		expect(outcome.stdout).toBe(`added    ${CLASS}\n`);
+		expect(JSON.parse(outcome.stdout).ok).toBe(true);
+	});
+
+	test('options follow the command, so a value is never read as one', async () => {
+		const outcome = await runCli(['--base', BASE, 'changes'], context);
+
+		expect(outcome.exitCode).toBe(ExitCode.usage);
+		expect(outcome.stderr).toContain(`unknown command: ${BASE}`);
+	});
+
+	test('an unexpected extra argument is refused', async () => {
+		const outcome = await runCli(['state-audit', 'yesterday'], context);
+
+		expect(outcome.exitCode).toBe(ExitCode.usage);
+		expect(outcome.stderr).toContain('yesterday');
 	});
 });

@@ -1,6 +1,14 @@
 import { PRODUCT_NAME } from '../../shared/meta/meta.ts';
+import { GLOBAL_FLAGS } from './commands/command.ts';
+import type { Command, FlagSpec, FlagSpecs } from './commands/command.ts';
+import { COMMANDS } from './commands/registry.ts';
 
-/** Shown for `--help` and for a bare invocation. */
+/**
+ * Shown for `--help` and for a bare invocation.
+ *
+ * Both lists are read from the registry rather than written out again here, so
+ * a command or a flag cannot exist without the help saying so.
+ */
 export function helpText(): string {
 	return [
 		`${PRODUCT_NAME} — code-first deployment pipelines for Salesforce`,
@@ -8,50 +16,44 @@ export function helpText(): string {
 		`Usage: ${PRODUCT_NAME} <command> [options]`,
 		'',
 		'Commands:',
-		'  changes        List the metadata changes between two exact commits',
-		'  plan           Build the deployment plan for a pull request',
-		'  gates          Run candidate quality gates without deployment credentials',
-		'  validate       Validate that plan against the configured org',
-		'  deploy         Deploy a plan that has already been validated',
-		'  publish-check  Publish the recorded verdict as the required GitHub check',
-		'  locate-run     Print the workflow run a green check points at',
-		'  locate-steps   Print workflow runs holding manual-step completions',
-		'  complete-step  Record that a manual pre-deployment step was carried out',
-		'  inspect-run    Verify a run bundle before reading its routing fields',
-		'  rollback       Build or publish a compensating PR for a successful run',
-		'  history        Build deployment history from verified run artifacts',
-		'  state-audit    Show the no-database MVP runtime-state contract',
+		...COMMANDS.map((command) => `  ${command.name.padEnd(commandWidth())}  ${command.summary}`),
 		'',
 		'Options:',
-		'  -h, --help            Show this help',
-		'  -v, --version         Show the version',
-		'      --json            Emit machine-readable output on stdout',
-		'      --repo            Repository to read (default: current directory)',
-		'      --base            Full SHA of the base commit',
-		'      --head            Full SHA of the head commit',
-		'      --repository      GitHub repository as owner/name',
-		'      --pull-request    Pull request number',
-		'      --environment     Environment id from docket.yml',
-		'      --target-branch   Branch the pull request targets',
-		'      --org-id          Skip org resolution and bind the plan to this org id',
-		'      --out             Directory for run artifacts',
-		'      --sf              Salesforce CLI executable (default: sf)',
-		'      --wait            Minutes to wait for Salesforce (default: 33)',
-		'      --validated-run   Artifacts directory of the validation to deploy',
-		'      --gates-run       Artifacts directory of credential-free passing gates',
-		'      --merge-commit    Commit GitHub produced by merging the pull request',
-		'      --require-merged  Verify with GitHub that the pull request was merged',
-		'      --workflow-run-id Workflow run the validation artifacts belong to',
-		'      --workflow-run-attempt Attempt number for that workflow run',
-		'      --expected-plan-identity Plan identity selected by the green check',
-		"      --artifacts-expire-at ISO-8601 instant this run's artifacts expire",
-		'      --details-url     Link the published check points at',
-		'      --steps           Directory of manual-step completion records',
-		'      --step            Name of the manual step being completed',
-		'      --by              Who completed that step',
-		'      --run             Recorded deployment artifacts selected for rollback',
-		'      --runs            Root containing deployment run artifact directories',
-		'      --create-pr       Publish the rollback as a new GitHub pull request',
+		...flagLines(GLOBAL_FLAGS),
+		'',
+		`Run \`${PRODUCT_NAME} <command> --help\` for the options that command takes.`,
 		'',
 	].join('\n');
+}
+
+/** Shown for `docket <command> --help`: the flags that command, and only it, takes. */
+export function commandHelpText(command: Command): string {
+	return [
+		`${PRODUCT_NAME} ${command.name} — ${command.summary}`,
+		'',
+		`Usage: ${PRODUCT_NAME} ${command.name} [options]`,
+		'',
+		...(Object.keys(command.flags).length === 0
+			? ['This command takes no options of its own.']
+			: ['Options:', ...flagLines(command.flags)]),
+		'',
+		'Global options:',
+		...flagLines(GLOBAL_FLAGS),
+		'',
+	].join('\n');
+}
+
+function commandWidth(): number {
+	return Math.max(...COMMANDS.map((command) => command.name.length));
+}
+
+function flagLines(flags: FlagSpecs): readonly string[] {
+	const entries = Object.entries(flags);
+	const width = Math.max(...entries.map(([name, spec]) => flagLabel(name, spec).length));
+
+	return entries.map(([name, spec]) => `  ${flagLabel(name, spec).padEnd(width)}  ${spec.description}`);
+}
+
+function flagLabel(name: string, spec: FlagSpec): string {
+	return `${spec.short === undefined ? '    ' : `-${spec.short}, `}--${name}`;
 }

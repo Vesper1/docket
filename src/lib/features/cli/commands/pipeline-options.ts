@@ -20,37 +20,34 @@ import { DEFAULT_SF_EXECUTABLE } from '../../salesforce/sf-cli.ts';
 import { parseSalesforceOrgId } from '../../salesforce/org-id.ts';
 import { requiredOption } from './option.ts';
 
-/** Flags shared by the commands that run a piece of the deployment process. */
-export interface PipelineOptions {
-	readonly repo?: string | undefined;
+/**
+ * Each helper below asks for exactly the flags it reads, and nothing else.
+ *
+ * A command satisfies one of these by declaring those flags; a command that
+ * does not declare them cannot call the helper, so the option table and the
+ * code that reads it cannot drift apart.
+ */
+export interface SourceOptions {
 	readonly repository?: string | undefined;
 	readonly 'pull-request'?: string | undefined;
 	readonly base?: string | undefined;
 	readonly head?: string | undefined;
-	readonly environment?: string | undefined;
-	readonly 'org-id'?: string | undefined;
 	readonly 'target-branch'?: string | undefined;
-	readonly out?: string | undefined;
-	readonly sf?: string | undefined;
-	readonly wait?: string | undefined;
-	readonly 'validated-run'?: string | undefined;
-	readonly 'gates-run'?: string | undefined;
-	readonly 'merge-commit'?: string | undefined;
 	readonly 'github-token'?: string | undefined;
-	readonly 'require-merged'?: boolean | undefined;
+}
+
+export interface GitHubOptions {
+	readonly 'github-token'?: string | undefined;
+}
+
+export interface OrgOptions {
+	readonly 'org-id'?: string | undefined;
+	readonly sf?: string | undefined;
+}
+
+export interface ExecutionOptions {
 	readonly 'workflow-run-id'?: string | undefined;
 	readonly 'workflow-run-attempt'?: string | undefined;
-	readonly 'expected-plan-identity'?: string | undefined;
-	readonly 'artifacts-expire-at'?: string | undefined;
-	readonly 'details-url'?: string | undefined;
-	/** Directory of manual-step completion records. */
-	readonly steps?: string | undefined;
-	readonly step?: string | undefined;
-	readonly by?: string | undefined;
-	readonly run?: string | undefined;
-	/** Root containing one or more run artifact directories. */
-	readonly runs?: string | undefined;
-	readonly 'create-pr'?: boolean | undefined;
 }
 
 /**
@@ -92,7 +89,7 @@ export interface ResolvedSource {
  * open yet.
  */
 export async function resolveSource(
-	options: PipelineOptions,
+	options: SourceOptions,
 	context: PipelineContext,
 	eligibility: 'validatable' | 'merged' = 'validatable',
 ): Promise<Result<ResolvedSource, DocketError>> {
@@ -138,7 +135,7 @@ export async function resolveSource(
  * token on a command line reaches the shell history and the process list.
  */
 export function githubClientOf(
-	options: PipelineOptions,
+	options: GitHubOptions,
 	context: PipelineContext,
 ): Result<GitHubClient, DocketError> {
 	const token = options['github-token'] ?? context.env['GITHUB_TOKEN'] ?? context.env['GH_TOKEN'];
@@ -158,7 +155,7 @@ export function githubClientOf(
 	});
 }
 
-export function planSourceOf(options: PipelineOptions): Result<PlanSource, DocketError> {
+export function planSourceOf(options: SourceOptions): Result<PlanSource, DocketError> {
 	const repository = requiredOption(options.repository, '--repository');
 	if (!repository.ok) return repository;
 
@@ -190,7 +187,7 @@ export function planSourceOf(options: PipelineOptions): Result<PlanSource, Docke
  * review, a dry run, a test. It is not a shortcut around verification: a
  * deployment re-resolves the alias and refuses an org that is not this id.
  */
-export function orgResolverOf(options: PipelineOptions, cwd: string): OrgIdResolver {
+export function orgResolverOf(options: OrgOptions, cwd: string): OrgIdResolver {
 	const explicit = options['org-id'];
 	if (explicit !== undefined && explicit !== '') {
 		return async () => parseSalesforceOrgId(explicit, '--org-id', ErrorCode.invalidOption);
@@ -202,11 +199,11 @@ export function orgResolverOf(options: PipelineOptions, cwd: string): OrgIdResol
 	};
 }
 
-export function sfExecutableOf(options: PipelineOptions): string {
+export function sfExecutableOf(options: { readonly sf?: string | undefined }): string {
 	return options.sf ?? DEFAULT_SF_EXECUTABLE;
 }
 
-export function waitMinutesOf(options: PipelineOptions): Result<number, DocketError> {
+export function waitMinutesOf(options: { readonly wait?: string | undefined }): Result<number, DocketError> {
 	if (options.wait === undefined) return ok(DEFAULT_WAIT_MINUTES);
 
 	return requiredNumber(options.wait, '--wait');
@@ -214,7 +211,7 @@ export function waitMinutesOf(options: PipelineOptions): Result<number, DocketEr
 
 /** A workflow run is an all-or-nothing provenance tuple, never a loose label. */
 export function executionOf(
-	options: PipelineOptions,
+	options: ExecutionOptions,
 ): Result<{ readonly executor: RunExecutor; readonly workflow?: RunWorkflow }, DocketError> {
 	const runId = options['workflow-run-id'];
 	const attempt = options['workflow-run-attempt'];
@@ -236,7 +233,7 @@ export function executionOf(
 }
 
 export function expectedPlanIdentityOf(
-	options: PipelineOptions,
+	options: { readonly 'expected-plan-identity'?: string | undefined },
 ): Result<string | undefined, DocketError> {
 	const identity = options['expected-plan-identity'];
 	if (identity === undefined) return ok(undefined);
@@ -261,7 +258,7 @@ export function expectedPlanIdentityOf(
  * has no retention at all and passes nothing.
  */
 export function artifactsExpireAtOf(
-	options: PipelineOptions,
+	options: { readonly 'artifacts-expire-at'?: string | undefined },
 ): Result<string | undefined, DocketError> {
 	const value = options['artifacts-expire-at'];
 	if (value === undefined) return ok(undefined);
@@ -284,12 +281,19 @@ export function timeoutMsOf(waitMinutes: number): number {
 	return (waitMinutes + GRACE_MINUTES) * 60_000;
 }
 
-export function outputDirectoryOf(options: PipelineOptions, cwd: string, fallback: string): string {
+export function outputDirectoryOf(
+	options: { readonly out?: string | undefined },
+	cwd: string,
+	fallback: string,
+): string {
 	const out = options.out ?? join('.docket', fallback);
 	return isAbsolute(out) ? out : join(cwd, out);
 }
 
-export function repositoryDirectoryOf(options: PipelineOptions, cwd: string): string {
+export function repositoryDirectoryOf(
+	options: { readonly repo?: string | undefined },
+	cwd: string,
+): string {
 	return options.repo ?? cwd;
 }
 

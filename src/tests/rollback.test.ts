@@ -4,23 +4,23 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, test } from 'vitest';
 
-import { isErr, isOk } from '../../shared/result/result.ts';
-import { runCli } from '../cli/cli.ts';
-import type { EnvironmentConfig } from '../config/docket-config.ts';
-import { runGit } from '../git/git-command.ts';
-import { readChanges } from '../git/read-changes.ts';
-import { createGitFixture } from '../git/testing/git-fixture.ts';
-import type { GitFixture, TreeSnapshot } from '../git/testing/git-fixture.ts';
-import { createCompensatingPullRequest } from '../github/rollback-pull-request.ts';
-import { createFakeGitHub } from '../github/testing/fake-github.ts';
-import { buildPlan } from '../plan/build-plan.ts';
-import type { PlanArtifacts } from '../plan/deployment-plan.ts';
-import { RUN_SCHEMA } from '../run/run-record.ts';
-import type { RunRecord } from '../run/run-record.ts';
-import { writeRunArtifacts } from '../run/write-artifacts.ts';
-import type { DeploymentOutcome } from '../salesforce/deploy.ts';
-import { validationRecordOf } from '../validation/validation-record.ts';
-import { buildRollbackProposal } from './rollback-plan.ts';
+import { isErr, isOk } from '../lib/shared/result/result.ts';
+import { runCli } from '../lib/features/cli/cli.ts';
+import type { EnvironmentConfig } from '../lib/features/config/docket-config.ts';
+import { runGit } from '../lib/features/git/git-command.ts';
+import { readChanges } from '../lib/features/git/read-changes.ts';
+import { createGitFixture } from '../lib/features/git/testing/git-fixture.ts';
+import type { GitFixture, TreeSnapshot } from '../lib/features/git/testing/git-fixture.ts';
+import { createCompensatingPullRequest } from '../lib/features/github/rollback-pull-request.ts';
+import { createFakeGitHub } from '../lib/features/github/testing/fake-github.ts';
+import { buildPlan } from '../lib/features/plan/build-plan.ts';
+import type { PlanArtifacts } from '../lib/features/plan/deployment-plan.ts';
+import { RUN_SCHEMA } from '../lib/features/run/run-record.ts';
+import type { RunRecord } from '../lib/features/run/run-record.ts';
+import { writeRunArtifacts } from '../lib/features/run/write-artifacts.ts';
+import type { DeploymentOutcome } from '../lib/features/salesforce/deploy.ts';
+import { validationRecordOf } from '../lib/features/validation/validation-record.ts';
+import { buildRollbackProposal } from '../lib/features/rollback/build-rollback.ts';
 
 const CLASSES = 'force-app/main/default/classes';
 const CONFIG = `version: 1
