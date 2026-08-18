@@ -1,5 +1,2 @@
 allowBuilds:
-  esbuild: set this to true or false
-onlyBuiltDependencies:
-  - esbuild
-strictDepBuilds: false
+  esbuild: true
