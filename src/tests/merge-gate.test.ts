@@ -34,6 +34,48 @@ describe('the merge gate', () => {
 		return setup;
 	}
 
+	/**
+	 * The case a live run found: validation died before it wrote `run.json`, so
+	 * `publish-check` had nothing to read and the pull request ended up with no
+	 * check at all — blocked, with the reason only in the workflow log.
+	 */
+	test('a run that recorded nothing publishes a failing check anyway', async () => {
+		const { context, repository } = await setUp();
+		const github = createFakeGitHub({
+			'POST /repos/acme/salesforce/check-runs': (request) => ({
+				status: 201,
+				body: { id: 8, ...(request.body as object) },
+			}),
+		});
+
+		const outcome = await runCli(
+			[
+				'publish-check',
+				'--repository',
+				'acme/salesforce',
+				'--head',
+				repository.headSha,
+				'--workflow-run-id',
+				'123456',
+				'--failed',
+				'the org refused the login',
+				'--json',
+			],
+			{ ...context, env: TOKEN, ...githubContext(github) },
+		);
+
+		expect(outcome.exitCode).toBe(ExitCode.success);
+		const posted = github.requests()[0]?.body as Record<string, unknown>;
+		expect(posted['name']).toBe('docket/validate');
+		expect(posted['conclusion']).toBe('failure');
+		expect(posted['head_sha']).toBe(repository.headSha);
+		// No identity, so no deployment can ever select this check.
+		expect(posted['external_id']).toBeUndefined();
+		expect(String((posted['output'] as Record<string, unknown>)['summary'])).toContain(
+			'the org refused the login',
+		);
+	});
+
 	test('a passed run publishes a green check that names its workflow run', async () => {
 		const { context, validated, repository } = await validatedRun();
 		const github = createFakeGitHub({

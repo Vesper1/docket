@@ -1,6 +1,7 @@
 import { docketError, ErrorCode } from '../../../../shared/result/docket-error.ts';
 import { err, ok } from '../../../../shared/result/result.ts';
 import { publishStepCheck, publishValidationCheck } from '../../../github/checks.ts';
+import type { GitHubClient } from '../../../github/github-client.ts';
 import { readValidationRun } from '../../../run/read-artifacts.ts';
 import { defineCommand } from '../command.ts';
 import { flagsFor } from '../flags.ts';
@@ -11,6 +12,8 @@ import { githubClientOf } from '../pipeline-options.ts';
 const flags = flagsFor(
 	'repository',
 	'validated-run',
+	'head',
+	'failed',
 	'workflow-run-id',
 	'details-url',
 	'github-token',
@@ -21,6 +24,13 @@ const flags = flagsFor(
  *
  * The verdict is read back from the artifacts rather than passed as a flag, so
  * the check can only ever say what the run actually recorded.
+ *
+ * `--failed` is the one exception, and it is deliberately one-way. A run can
+ * die before it records anything — a bad credential, a missing CLI, an org
+ * that refuses the login — and then there is no artifact to read a verdict
+ * from. Without a check at all the pull request shows nothing: the merge is
+ * blocked, which is safe, but the reason lives only in the workflow log. This
+ * mode publishes the failure itself. It can never publish a pass.
  */
 export const publishCheckCommand = defineCommand({
 	name: 'publish-check',
@@ -29,6 +39,13 @@ export const publishCheckCommand = defineCommand({
 	run: async (options, context) => {
 		const repository = requiredOption(options.repository, '--repository');
 		if (!repository.ok) return repository;
+
+		const client = githubClientOf(options, context);
+		if (!client.ok) return client;
+
+		if (options.failed !== undefined) {
+			return publishFailure(client.value, repository.value, options);
+		}
 
 		const directory = requiredOption(options['validated-run'], '--validated-run');
 		if (!directory.ok) return directory;
@@ -46,9 +63,6 @@ export const publishCheckCommand = defineCommand({
 				),
 			);
 		}
-
-		const client = githubClientOf(options, context);
-		if (!client.ok) return client;
 
 		const published = await publishValidationCheck(client.value, {
 			repository: repository.value,
@@ -80,6 +94,37 @@ export const publishCheckCommand = defineCommand({
 		return ok({ kind: 'check', check: published.value });
 	},
 });
+
+/**
+ * The failing check a run publishes about itself when it recorded nothing.
+ *
+ * It carries no plan identity, so `findOriginatingRun` can never select it and
+ * no deployment can ever be built from it.
+ */
+async function publishFailure(
+	client: GitHubClient,
+	repository: string,
+	options: Record<string, string | undefined>,
+) {
+	const headSha = requiredOption(options['head'], '--head');
+	if (!headSha.ok) return headSha;
+
+	const workflowRunId = requiredOption(options['workflow-run-id'], '--workflow-run-id');
+	if (!workflowRunId.ok) return workflowRunId;
+
+	const published = await publishValidationCheck(client, {
+		repository,
+		headSha: headSha.value,
+		verdict: 'failed',
+		planIdentity: null,
+		workflowRunId: workflowRunId.value,
+		summary: `Docket validation could not complete: ${options.failed ?? ''}`,
+		...(options['details-url'] === undefined ? {} : { detailsUrl: options['details-url'] }),
+	});
+	if (!published.ok) return published;
+
+	return ok({ kind: 'check' as const, check: published.value });
+}
 
 /**
  * The verdict, and its reasons, in the space a check summary gets. Whoever is

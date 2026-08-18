@@ -19,8 +19,13 @@ export interface PublishCheckRequest {
 	/** The head commit the verdict is about. A check belongs to one commit. */
 	readonly headSha: string;
 	readonly verdict: Verdict;
-	/** The identity of the plan this verdict approved. */
-	readonly planIdentity: string;
+	/**
+	 * The identity of the plan this verdict approved, or `null` when the run
+	 * never got far enough to have one. A failed check with no identity still
+	 * blocks the merge; it simply cannot be pointed at by a deployment, which
+	 * is correct — there is nothing to deploy.
+	 */
+	readonly planIdentity: string | null;
 	/** The workflow run that produced the validation artifacts. */
 	readonly workflowRunId: string;
 	readonly summary: string;
@@ -48,7 +53,19 @@ export async function publishValidationCheck(
 	client: GitHubClient,
 	request: PublishCheckRequest,
 ): Promise<Result<PublishedCheck, DocketError>> {
-	const externalId = encodeExternalId(request.workflowRunId, request.planIdentity);
+	// A verdict with no plan behind it may only ever be a failure: `external_id`
+	// is what a deployment reads to find the run it may deploy, so a check
+	// without one must never be able to conclude success.
+	if (request.planIdentity === null && request.verdict === 'passed') {
+		return err(
+			docketError(ErrorCode.planMismatch, 'refusing to publish a passing check for no plan'),
+		);
+	}
+
+	const externalId =
+		request.planIdentity === null
+			? undefined
+			: encodeExternalId(request.workflowRunId, request.planIdentity);
 
 	const response = await githubRequest(client, {
 		method: 'POST',
@@ -58,7 +75,7 @@ export async function publishValidationCheck(
 			head_sha: request.headSha,
 			status: 'completed',
 			conclusion: request.verdict === 'passed' ? 'success' : 'failure',
-			external_id: externalId,
+			...(externalId === undefined ? {} : { external_id: externalId }),
 			...(request.detailsUrl === undefined ? {} : { details_url: request.detailsUrl }),
 			output: {
 				title: request.verdict === 'passed' ? 'Validation passed' : 'Validation failed',
@@ -79,7 +96,7 @@ export async function publishValidationCheck(
 		name: text(body?.['name']) ?? VALIDATION_CHECK_NAME,
 		headSha: text(body?.['head_sha']) ?? request.headSha,
 		conclusion: text(body?.['conclusion']) ?? '',
-		externalId,
+		externalId: externalId ?? '',
 	});
 }
 
@@ -298,11 +315,20 @@ export async function findOriginatingRun(
 	// index rather than by that would let a third party choose the plan.
 	const ours = checks.filter((check) => decodeExternalId(text(check['external_id'])) !== undefined);
 	if (ours.length === 0) {
+		// A run that failed before it had a plan publishes a failing check with
+		// no identity. Report that verdict rather than the missing field: the
+		// answer to "why can this not be deployed" is that validation failed.
+		const failed = checks.find((check) => text(check['conclusion']) !== 'success');
 		return err(
-			docketError(
-				ErrorCode.githubFailed,
-				`no ${VALIDATION_CHECK_NAME} check for ${headSha} names its workflow run`,
-			),
+			failed === undefined
+				? docketError(
+						ErrorCode.githubFailed,
+						`no ${VALIDATION_CHECK_NAME} check for ${headSha} names its workflow run`,
+					)
+				: docketError(
+						ErrorCode.validationNotPassed,
+						`the ${VALIDATION_CHECK_NAME} check for ${headSha} concluded ${text(failed['conclusion']) ?? 'nothing'}`,
+					),
 		);
 	}
 

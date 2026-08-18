@@ -191,7 +191,10 @@ The M12 fixture audit records three code-MVP limits rather than hiding them:
    `repository + PR + baseSha + headSha + orgId + tests + deletion policy +
    manifest digests`.
 7. Require all manual pre-deployment steps to be completed.
-8. Publish a required GitHub validation check for the current PR head.
+8. Publish a required GitHub validation check for the current PR head. A run
+   that died before it recorded a verdict publishes the failure itself, so the
+   pull request never shows a blocked merge with no stated reason; that check
+   carries no plan identity and can never be selected by a deployment.
 9. Require the PR to stay up to date with its target branch; a changed base or
    head invalidates the check and requires validation again.
 

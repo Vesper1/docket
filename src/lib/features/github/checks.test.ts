@@ -3,6 +3,7 @@ import { describe, expect, test } from 'vitest';
 import { isErr, isOk } from '../../shared/result/result.ts';
 import {
 	completeStepCheck,
+	publishValidationCheck,
 	findOriginatingRun,
 	findStepCompletionRuns,
 	publishStepCheck,
@@ -136,5 +137,64 @@ describe('the validation check behind a deployment', () => {
 
 		const found = await findOriginatingRun(client(fake), REPOSITORY, HEAD);
 		expect(isErr(found) && found.error.code).toBe('github_failed');
+	});
+});
+
+/**
+ * A run that dies before it records a verdict has no plan to name. It must
+ * still be able to say so, and must never be able to say anything else.
+ */
+describe('a validation check with no plan behind it', () => {
+	test('publishes a failure that carries no identity', async () => {
+		const fake = createFakeGitHub({
+			[`POST /repos/${REPOSITORY}/check-runs`]: { status: 201, body: { id: 42 } },
+		});
+
+		const published = await publishValidationCheck(client(fake), {
+			repository: REPOSITORY,
+			headSha: HEAD,
+			verdict: 'failed',
+			planIdentity: null,
+			workflowRunId: '100',
+			summary: 'the run recorded no verdict',
+		});
+
+		expect(isOk(published)).toBe(true);
+		const body = fake.requests()[0]?.body as Record<string, unknown>;
+		expect(body['name']).toBe(VALIDATION_CHECK_NAME);
+		expect(body['conclusion']).toBe('failure');
+		// Nothing for a deployment to select: the identity is what it reads.
+		expect(body['external_id']).toBeUndefined();
+	});
+
+	test('cannot be turned into a passing one', async () => {
+		const fake = createFakeGitHub({
+			[`POST /repos/${REPOSITORY}/check-runs`]: { status: 201, body: { id: 43 } },
+		});
+
+		const published = await publishValidationCheck(client(fake), {
+			repository: REPOSITORY,
+			headSha: HEAD,
+			verdict: 'passed',
+			planIdentity: null,
+			workflowRunId: '100',
+			summary: 'nothing happened, honest',
+		});
+
+		expect(isErr(published)).toBe(true);
+		expect(fake.requests()).toEqual([]);
+	});
+
+	test('is reported as a failed validation, not as a malformed check', async () => {
+		const fake = createFakeGitHub({
+			[LIST]: {
+				status: 200,
+				body: { check_runs: [{ id: 44, conclusion: 'failure', external_id: '' }] },
+			},
+		});
+
+		const found = await findOriginatingRun(client(fake), REPOSITORY, HEAD);
+
+		expect(isErr(found) && found.error.code).toBe('validation_not_passed');
 	});
 });

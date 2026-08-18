@@ -52,6 +52,10 @@ const FLAGS = {
 		type: 'string',
 		description: 'Minutes to wait for Salesforce (default: 33)',
 	},
+	failed: {
+		type: 'string',
+		description: 'Publish a failing check for a run that recorded nothing',
+	},
 	'validated-run': {
 		type: 'string',
 		description: 'Artifacts directory of the validation to deploy',

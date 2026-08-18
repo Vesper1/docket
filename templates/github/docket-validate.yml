@@ -181,7 +181,22 @@ jobs:
             --artifacts-expire-at "$expires_at" \
             --out "$RUNNER_TEMP/docket-run"
 
+      # A run that died before it recorded anything has no verdict to publish
+      # and no artifacts to upload. Both steps below ask this one what happened
+      # rather than assuming the record exists.
+      - name: Note whether the run recorded itself
+        id: record
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ -f "$RUNNER_TEMP/docket-run/run.json" ]; then
+            echo "recorded=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "recorded=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Upload the validated plan
+        if: steps.record.outputs.recorded == 'true'
         uses: actions/upload-artifact@v4
         with:
           # The exact PR and head SHA, so a deployment can only ever pick up
@@ -190,16 +205,32 @@ jobs:
           path: ${{ runner.temp }}/docket-run
           if-no-files-found: error
 
+      # Whatever happened, the pull request must show it. Without a check the
+      # merge is blocked with no visible reason, and the answer lives only in
+      # this log.
       - name: Publish the required check
+        if: always()
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          $DOCKET publish-check \
-            --repository "$GITHUB_REPOSITORY" \
-            --validated-run "$RUNNER_TEMP/docket-run" \
-            --workflow-run-id "$GITHUB_RUN_ID" \
-            --details-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          set -euo pipefail
+          if [ "${{ steps.record.outputs.recorded }}" = "true" ]; then
+            $DOCKET publish-check \
+              --repository "$GITHUB_REPOSITORY" \
+              --validated-run "$RUNNER_TEMP/docket-run" \
+              --workflow-run-id "$GITHUB_RUN_ID" \
+              --details-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          else
+            # `--failed` can only ever publish a failure, and the check it
+            # publishes carries no plan identity, so no deployment can select it.
+            $DOCKET publish-check \
+              --repository "$GITHUB_REPOSITORY" \
+              --head "${{ github.event.pull_request.head.sha }}" \
+              --workflow-run-id "$GITHUB_RUN_ID" \
+              --failed "the run recorded no verdict; see the workflow log" \
+              --details-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          fi
 
       - name: Fail the job when validation failed
-        if: steps.validate.outcome != 'success'
+        if: always() && steps.validate.outcome != 'success'
         run: exit 1

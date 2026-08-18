@@ -86,9 +86,36 @@ describe('the validation workflow', () => {
 		expect(validate['continue-on-error']).toBe(true);
 
 		const publish = steps.findIndex((step) => String(step.run ?? '').includes('publish-check'));
-		const fail = steps.findIndex((step) => step.if === "steps.validate.outcome != 'success'");
+		const fail = steps.findIndex((step) =>
+			String(step.if ?? '').includes("steps.validate.outcome != 'success'"),
+		);
 		expect(publish).toBeGreaterThan(-1);
 		expect(fail).toBeGreaterThan(publish);
+	});
+
+	/**
+	 * A run can die before it writes anything — a rejected credential, a missing
+	 * CLI. Without a check the pull request shows no reason at all: the merge is
+	 * blocked, but only the workflow log knows why.
+	 */
+	test('a run that records nothing still publishes a failing check', async () => {
+		const { jobs } = await workflow('docket-validate.yml');
+		const steps: any[] = jobs.validate.steps;
+
+		const record = steps.find((step) => step.id === 'record');
+		expect(record.if).toBe('always()');
+		expect(record.run).toContain('$RUNNER_TEMP/docket-run/run.json');
+
+		const upload = steps.find((step) =>
+			String(step.uses ?? '').startsWith('actions/upload-artifact'),
+		);
+		expect(upload.if).toBe("steps.record.outputs.recorded == 'true'");
+
+		const publish = steps.find((step) => String(step.run ?? '').includes('publish-check'));
+		expect(publish.if).toBe('always()');
+		expect(publish.run).toContain('--failed');
+		// The fallback names the commit itself: there is no record to read it from.
+		expect(publish.run).toContain('--head "${{ github.event.pull_request.head.sha }}"');
 	});
 });
 
