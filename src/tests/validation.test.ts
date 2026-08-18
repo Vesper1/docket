@@ -6,9 +6,63 @@ import { describe, expect, test } from 'vitest';
 import { runCli } from '../lib/features/cli/cli.ts';
 import { ExitCode } from '../lib/features/cli/exit-code.ts';
 import { failedDeployment, orgDisplay } from '../lib/features/salesforce/testing/fake-sf.ts';
-import { CLASSES, CONFIG, PROJECT, pipelineFixtures, VALIDATION_ID } from './testing/pipeline-fixture.ts';
+import {
+	CLASSES,
+	CONFIG,
+	PROJECT,
+	pipelineFixtures,
+	VALIDATION_ID,
+} from './testing/pipeline-fixture.ts';
 
 const { setUp, setUpTree } = pipelineFixtures();
+
+/**
+ * A pull request that changes no Salesforce metadata — documentation, CI
+ * configuration, the vendored engine — still has to reach a green check, or
+ * branch protection can never let it merge. Salesforce refuses an empty
+ * request outright, so the run must not make one.
+ */
+describe('a pull request that changes no metadata', () => {
+	const nothing = {
+		base: { 'docket.yml': CONFIG, 'sfdx-project.json': PROJECT, [`${CLASSES}/Foo.cls`]: 'public class Foo {}' },
+		head: {
+			'docket.yml': CONFIG,
+			'sfdx-project.json': PROJECT,
+			[`${CLASSES}/Foo.cls`]: 'public class Foo {}',
+			'README.md': '# not metadata\n',
+		},
+	};
+
+	test('passes validation without asking Salesforce anything', async () => {
+		const { context, validation, validated, calls } = await setUpTree(nothing);
+
+		const outcome = await runCli(['validate', ...validation, '--out', validated, '--json'], context);
+
+		expect(outcome.exitCode).toBe(ExitCode.success);
+		const { data } = JSON.parse(outcome.stdout);
+		expect(data.run.status).toBe('passed');
+		expect(data.run.plan.components).toEqual({ deployable: [], destructive: [] });
+		// Stated in the record, so a later reader never has to infer why a
+		// passing validation carries no deployment.
+		expect(data.run.validation.salesforce).toBe('not-required');
+		expect(data.run.validation.deployment).toBeNull();
+		expect(data.run.validation.failures).toEqual([]);
+		expect(await calls()).not.toContain('project deploy validate');
+	});
+
+	test('a plan with components is never excused from asking', async () => {
+		const { context, validation, validated, calls } = await setUpTree({
+			...nothing,
+			head: { ...nothing.base, [`${CLASSES}/Bar.cls`]: 'public class Bar {}' },
+		});
+
+		const outcome = await runCli(['validate', ...validation, '--out', validated, '--json'], context);
+
+		const { data } = JSON.parse(outcome.stdout);
+		expect(data.run.validation.salesforce).toBe('validated');
+		expect(await calls()).toContain('project deploy validate');
+	});
+});
 
 describe('a local validation', () => {
 	test('validates the exact plan and records the run', async () => {

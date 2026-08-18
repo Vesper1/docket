@@ -37,6 +37,19 @@ export interface PlanSteps {
 	readonly postDeployment: readonly StepDefinition[];
 }
 
+/**
+ * Whether the plan asks Salesforce for anything at all.
+ *
+ * A pull request that touches no metadata — documentation, CI configuration,
+ * the vendored engine — produces a plan with both lists empty. Salesforce
+ * refuses such a request outright ("No local changes to deploy"), so the run
+ * must not make it: an empty plan is a legitimate outcome that still has to
+ * reach a green check, or the change could never be merged.
+ */
+export function planChangesMetadata(plan: DeploymentPlan): boolean {
+	return plan.components.deployable.length > 0 || plan.components.destructive.length > 0;
+}
+
 export interface ManifestDigests {
 	readonly packageXml: string;
 	/** `null` when the plan deletes nothing, so its absence is explicit. */

@@ -43,6 +43,14 @@ export interface ValidationRecord {
 	readonly org: { readonly reference: string; readonly id: string };
 	readonly tests: TestSelection;
 	readonly steps: readonly StepResult[];
+	/**
+	 * Whether Salesforce was asked at all. `not-required` belongs to a plan
+	 * with no components: Salesforce rejects an empty request, so a pull
+	 * request that changes no metadata is validated without it. It is recorded
+	 * rather than inferred, so a later reader never has to guess why a passing
+	 * record carries no deployment.
+	 */
+	readonly salesforce: 'validated' | 'not-required';
 	/** Absent when validation failed before Salesforce was ever asked. */
 	readonly deployment: DeploymentOutcome | null;
 	/** Human-readable reasons, in the order they were found. */
@@ -53,6 +61,8 @@ export interface ValidationInput {
 	readonly plan: DeploymentPlan;
 	readonly steps: readonly StepResult[];
 	readonly deployment: DeploymentOutcome | null;
+	/** Defaults to `validated`: omitting it never excuses a missing answer. */
+	readonly salesforce?: 'validated' | 'not-required';
 	/** Reasons validation failed before Salesforce ran, if any. */
 	readonly failures?: readonly string[];
 }
@@ -82,8 +92,11 @@ export function validationRecordOf(input: ValidationInput): ValidationRecord {
 		}
 	}
 
-	// No Salesforce answer at all is a failure, never a pass by omission.
-	if (deployment === null && failures.length === 0) {
+	const salesforce = input.salesforce ?? 'validated';
+
+	// No Salesforce answer at all is a failure, never a pass by omission —
+	// unless the plan had nothing to ask about, which is stated, not assumed.
+	if (salesforce === 'validated' && deployment === null && failures.length === 0) {
 		failures.push('Salesforce validation did not run');
 	}
 
@@ -94,6 +107,7 @@ export function validationRecordOf(input: ValidationInput): ValidationRecord {
 		org: { reference: input.plan.target.org, id: input.plan.target.orgId },
 		tests: input.plan.tests,
 		steps: input.steps,
+		salesforce,
 		deployment,
 		failures,
 	};

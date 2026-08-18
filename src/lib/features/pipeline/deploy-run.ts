@@ -12,6 +12,7 @@ import { selectEnvironment } from '../config/select-environment.ts';
 import { readFileAtCommit } from '../git/read-file.ts';
 import { withWorkspace } from '../git/workspace.ts';
 import { renderReport } from '../plan/report.ts';
+import { planChangesMetadata } from '../plan/deployment-plan.ts';
 import type { DeploymentPlan } from '../plan/deployment-plan.ts';
 import { readValidatedRun } from '../run/read-artifacts.ts';
 import { RUN_SCHEMA } from '../run/run-record.ts';
@@ -142,7 +143,10 @@ export async function deployRun(request: DeployRunRequest): Promise<Result<RunRe
 						return ok({ steps: before.results, logs: before.logs, deployment: null });
 					}
 
-					const deployment = await runDeployment(
+					// The validated plan asked Salesforce for nothing, so neither does
+					// the deployment. The steps around it still run and are recorded.
+					const deployment = planChangesMetadata(plan)
+						? await runDeployment(
 						{ ...request.cli, cwd: candidateWorkspace.directory },
 						'deploy',
 						{
@@ -152,7 +156,8 @@ export async function deployRun(request: DeployRunRequest): Promise<Result<RunRe
 							tests: plan.tests,
 							waitMinutes: request.waitMinutes,
 						},
-					);
+						)
+						: ok(null);
 					if (!deployment.ok) return deployment;
 
 					// §5 Phase E.1: post-deployment steps run whatever the deployment
@@ -204,8 +209,13 @@ function recordOf(
 	steps: readonly StepResult[],
 	deployment: DeploymentOutcome | null,
 ): RunRecord {
+	// A plan with no components deploys nothing, so a missing Salesforce answer
+	// is the expected one. For every other plan it is still a failure.
+	const missingAnswer = planChangesMetadata(plan) && deployment === null;
 	const failed =
-		deployment === null || !deployment.success || steps.some((step) => step.status === 'failed');
+		missingAnswer ||
+		(deployment !== null && !deployment.success) ||
+		steps.some((step) => step.status === 'failed');
 
 	return {
 		schema: RUN_SCHEMA,

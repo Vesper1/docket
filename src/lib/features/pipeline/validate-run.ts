@@ -9,6 +9,8 @@ import { ARTIFACT_NAMES, writeRunArtifacts } from '../run/write-artifacts.ts';
 import type { LogFile } from '../run/write-artifacts.ts';
 import { RUN_SCHEMA } from '../run/run-record.ts';
 import type { RunExecutor, RunRecord, RunTiming, RunWorkflow } from '../run/run-record.ts';
+import { planChangesMetadata } from '../plan/deployment-plan.ts';
+import type { DeploymentPlan } from '../plan/deployment-plan.ts';
 import { runDeployment } from '../salesforce/deploy.ts';
 import type { DeploymentOutcome } from '../salesforce/deploy.ts';
 import type { SalesforceCli } from '../salesforce/sf-cli.ts';
@@ -22,6 +24,8 @@ interface ExecutionOutcome {
 	readonly steps: readonly StepResult[];
 	readonly logs: readonly LogFile[];
 	readonly deployment: DeploymentOutcome | null;
+	/** `not-required` when the plan had no components to ask Salesforce about. */
+	readonly salesforce: 'validated' | 'not-required';
 }
 
 export interface ValidateRequest {
@@ -61,7 +65,24 @@ export async function validateRun(request: ValidateRequest): Promise<Result<RunR
 			// guard even though the artifact reader only admits a full pass: a direct
 			// library caller must not be able to smuggle a failed gate into Salesforce.
 			if (request.gates.results.some((step) => step.status !== 'passed')) {
-				return ok({ steps: request.gates.results, logs: request.gates.logs, deployment: null });
+				return ok({
+					steps: request.gates.results,
+					logs: request.gates.logs,
+					deployment: null,
+					salesforce: 'validated',
+				});
+			}
+
+			// A pull request that changes no metadata still has to reach a green
+			// check, and Salesforce refuses an empty request. Skipping the call is
+			// the only way such a change can ever be merged.
+			if (!planChangesMetadata(plan.plan)) {
+				return ok({
+					steps: [...request.gates.results, ...manualSteps(plan.plan)],
+					logs: request.gates.logs,
+					deployment: null,
+					salesforce: 'not-required',
+				});
 			}
 
 			const deployment = await runDeployment(
@@ -80,25 +101,11 @@ export async function validateRun(request: ValidateRequest): Promise<Result<RunR
 			// Automatic pre-deployment hooks belong immediately before deployment,
 			// not here. Running them here would execute them twice and, worse, would
 			// expose validation credentials to candidate-controlled script bytes.
-			const manual: StepResult[] = plan.plan.steps.preDeployment.flatMap((step) =>
-				step.kind === 'manual'
-					? [
-							{
-								name: step.name,
-								kind: 'pre',
-								manual: true,
-								status: 'pending',
-								exitCode: null,
-								completedBy: null,
-							} as const,
-						]
-					: [],
-			);
-
 			return ok({
-				steps: [...request.gates.results, ...manual],
+				steps: [...request.gates.results, ...manualSteps(plan.plan)],
 				logs: request.gates.logs,
 				deployment: deployment.value,
+				salesforce: 'validated',
 			});
 		},
 	);
@@ -108,6 +115,7 @@ export async function validateRun(request: ValidateRequest): Promise<Result<RunR
 		plan: plan.plan,
 		steps: outcome.value.steps,
 		deployment: outcome.value.deployment,
+		salesforce: outcome.value.salesforce,
 	});
 
 	const run: RunRecord = {
@@ -134,6 +142,27 @@ export async function validateRun(request: ValidateRequest): Promise<Result<RunR
 	if (!written.ok) return written;
 
 	return ok(run);
+}
+
+/**
+ * Manual pre-deployment steps enter the record as `pending`: nobody has done
+ * them yet, and the merge stays blocked until somebody records that they did.
+ */
+function manualSteps(plan: DeploymentPlan): StepResult[] {
+	return plan.steps.preDeployment.flatMap((step) =>
+		step.kind === 'manual'
+			? [
+					{
+						name: step.name,
+						kind: 'pre',
+						manual: true,
+						status: 'pending',
+						exitCode: null,
+						completedBy: null,
+					} as const,
+				]
+			: [],
+	);
 }
 
 /**

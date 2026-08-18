@@ -66,6 +66,7 @@ export function isValidationRecord(value: unknown): value is ValidationRecord {
 		!isSalesforceOrgId(org?.['id']) ||
 		!isTestSelection(validation['tests']) ||
 		!isStepResults(validation['steps']) ||
+		!oneOf(validation['salesforce'], ['validated', 'not-required']) ||
 		!(deployment === null || isDeploymentOutcome(deployment)) ||
 		!stringArray(failures)
 	) {
@@ -73,12 +74,16 @@ export function isValidationRecord(value: unknown): value is ValidationRecord {
 	}
 
 	if (deployment !== null && deployment.checkOnly !== true) return false;
+	// `not-required` is a claim that nothing was asked, so an answer contradicts
+	// it. Whether the claim was allowed is checked against the plan, in
+	// `isRunRecord`.
+	if (validation['salesforce'] === 'not-required' && deployment !== null) return false;
 
 	if (validation['verdict'] === 'passed') {
 		return (
 			failures.length === 0 &&
-			deployment !== null &&
-			deployment.success &&
+			(validation['salesforce'] === 'not-required' ||
+				(deployment !== null && deployment.success)) &&
 			!validation['steps'].some((step) => step.status === 'failed')
 		);
 	}
@@ -116,6 +121,14 @@ export function isRunRecord(value: unknown): value is RunRecord {
 	if (run['executor'] === 'local' ? workflow !== null : workflow === null) return false;
 	if (validation === null) return false;
 
+	// Only a plan with nothing in it may claim Salesforce was not required, and
+	// such a plan may not claim otherwise: this is what stops an artifact from
+	// buying a green verdict by asserting there was nothing to validate.
+	const emptyPlan =
+		run['plan'].components.deployable.length === 0 &&
+		run['plan'].components.destructive.length === 0;
+	if (emptyPlan !== (validation.salesforce === 'not-required')) return false;
+
 	if (run['kind'] === 'validate') {
 		return (
 			run['status'] === validation.verdict &&
@@ -126,9 +139,9 @@ export function isRunRecord(value: unknown): value is RunRecord {
 	}
 
 	if (deployment !== null && deployment.checkOnly) return false;
+	if (emptyPlan && deployment !== null) return false;
 	const failed =
-		deployment === null ||
-		!deployment.success ||
+		(!emptyPlan && (deployment === null || !deployment.success)) ||
 		run['steps'].some((step) => step.status === 'failed' || step.status === 'pending');
 	return run['status'] === (failed ? 'failed' : 'passed');
 }

@@ -227,6 +227,28 @@ describe('a local deployment of a validated plan', () => {
 		expect(await calls()).not.toContain('project deploy start');
 	});
 
+	test('a plan with components cannot claim Salesforce was not required', async () => {
+		const { context, deployment, validated: directory, calls } = await validatedRun();
+
+		// Left unchecked, this is a green verdict for free: assert there was
+		// nothing to validate and no org ever sees the change.
+		const validation = JSON.parse(await readFile(join(directory, 'validation.json'), 'utf8'));
+		validation.salesforce = 'not-required';
+		validation.deployment = null;
+		await writeFile(join(directory, 'validation.json'), JSON.stringify(validation), 'utf8');
+		const run = JSON.parse(await readFile(join(directory, 'run.json'), 'utf8'));
+		run.validation = validation;
+		await writeFile(join(directory, 'run.json'), JSON.stringify(run), 'utf8');
+
+		const outcome = await runCli(
+			['deploy', ...deployment, '--validated-run', directory, '--out', join(context.cwd, 'deploy'), '--json'],
+			context,
+		);
+
+		expect(outcome.exitCode).not.toBe(ExitCode.success);
+		expect(await calls()).not.toContain('project deploy start');
+	});
+
 	test('an org that is no longer the validated one is refused', async () => {
 		const setup = await validatedRun();
 
