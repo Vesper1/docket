@@ -1,0 +1,81 @@
+# Docket — build the single file a Salesforce repository vendors.
+#
+# This is the only workflow of the engine repository itself. It publishes
+# nothing to a registry: `.docket/docket.mjs` is committed by the consuming
+# repository, and this workflow just produces the exact file to commit and
+# states its checksum.
+#
+# Tag a commit `v<version>` matching `package.json` and the bundle is attached
+# to that release. `workflow_dispatch` produces the same file as a plain
+# artifact, so a first live run does not need a tag.
+name: Release engine
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      # A released bundle is what other repositories deploy with, so it is
+      # verified before it exists, not after.
+      - name: Verify the engine
+        run: |
+          set -euo pipefail
+          pnpm typecheck
+          pnpm test
+
+      - name: Require the tag to name the built version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          tagged="${GITHUB_REF_NAME#v}"
+          declared=$(node -p "require('./package.json').version")
+          if [ "$tagged" != "$declared" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package.json version $declared." >&2
+            exit 1
+          fi
+
+      - name: Build the vendorable bundle
+        run: |
+          set -euo pipefail
+          pnpm bundle
+          # The value a consumer compares against the sha256sum its own
+          # workflow logs on every run.
+          sha256sum bundle/docket.mjs | tee bundle/docket.mjs.sha256
+
+      - name: Upload the bundle for a dispatched build
+        uses: actions/upload-artifact@v4
+        with:
+          name: docket-engine-${{ github.sha }}
+          path: bundle/
+          if-no-files-found: error
+
+      - name: Attach the bundle to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Vendor into a Salesforce repository as \`.docket/docket.mjs\`. Verify with \`docket.mjs.sha256\`." \
+            bundle/docket.mjs bundle/docket.mjs.sha256

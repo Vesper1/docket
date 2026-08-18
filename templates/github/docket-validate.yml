@@ -6,11 +6,10 @@
 #
 # Two things must be configured before this workflow is safe to enable.
 #
-# 1. `DOCKET_PACKAGE` — a repository variable naming the exact engine to
-#    install. There is an unrelated public `docket` package on npm, so this is
-#    never `npx docket`: pin an exact published version
-#    (`@vesper1/docket@0.1.0`), a tarball URL, or a vendored path. See
-#    `templates/github/README.md`.
+# 1. `.docket/docket.mjs` — the vendored engine bundle, committed to this
+#    repository. Every job reads it out of the pull request's *base* commit,
+#    never out of the candidate checkout, so a pull request cannot swap the
+#    engine that runs beside the credential. See `templates/github/README.md`.
 #
 # 2. Required reviewers on the `qa` GitHub Environment. A `pull_request` event
 #    runs the workflow file *from the pull request*, so an unmerged change can
@@ -36,9 +35,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # The exact engine this repository trusts. Never a bare package name.
-  DOCKET_PACKAGE: ${{ vars.DOCKET_PACKAGE }}
-  DOCKET: docket
+  # The vendored engine, committed to this repository. It is read from a
+  # trusted commit rather than installed, so no registry or token is
+  # involved. `DOCKET` itself is set by the step that materializes it.
+  DOCKET_ENGINE: .docket/docket.mjs
   DOCKET_ENVIRONMENT: qa
 
 jobs:
@@ -64,17 +64,23 @@ jobs:
         with:
           node-version: '24'
 
-      # The engine is a public package, so this step needs no credential at
-      # all. That is deliberate: in the gate job it runs beside
-      # candidate-controlled commands.
-      - name: Install the pinned Docket engine
+      # The engine is executable configuration, so it is read from a
+      # commit that was already reviewed — never from the candidate's
+      # checkout, which sits in this same workspace. This is the rule
+      # `docket.yml` already follows.
+      - name: Materialize the trusted Docket engine
+        env:
+          DOCKET_ENGINE_REF: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          if [ -z "${DOCKET_PACKAGE:-}" ]; then
-            echo "Set the DOCKET_PACKAGE repository variable to the exact Docket engine this repository trusts." >&2
+          if ! git cat-file -e "$DOCKET_ENGINE_REF:$DOCKET_ENGINE" 2>/dev/null; then
+            echo "Commit $DOCKET_ENGINE_REF does not contain $DOCKET_ENGINE. Vendor the engine bundle into the repository first." >&2
             exit 1
           fi
-          npm install --global "$DOCKET_PACKAGE"
+          git show "$DOCKET_ENGINE_REF:$DOCKET_ENGINE" > "$RUNNER_TEMP/docket.mjs"
+          # Printed so a run can be tied to one exact engine build.
+          sha256sum "$RUNNER_TEMP/docket.mjs"
+          echo "DOCKET=node $RUNNER_TEMP/docket.mjs" >> "$GITHUB_ENV"
 
       - name: Run candidate gates without deployment credentials
         run: |
@@ -117,17 +123,23 @@ jobs:
         with:
           node-version: '24'
 
-      # The engine is a public package, so this step needs no credential at
-      # all. That is deliberate: in the gate job it runs beside
-      # candidate-controlled commands.
-      - name: Install the pinned Docket engine
+      # The engine is executable configuration, so it is read from a
+      # commit that was already reviewed — never from the candidate's
+      # checkout, which sits in this same workspace. This is the rule
+      # `docket.yml` already follows.
+      - name: Materialize the trusted Docket engine
+        env:
+          DOCKET_ENGINE_REF: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          if [ -z "${DOCKET_PACKAGE:-}" ]; then
-            echo "Set the DOCKET_PACKAGE repository variable to the exact Docket engine this repository trusts." >&2
+          if ! git cat-file -e "$DOCKET_ENGINE_REF:$DOCKET_ENGINE" 2>/dev/null; then
+            echo "Commit $DOCKET_ENGINE_REF does not contain $DOCKET_ENGINE. Vendor the engine bundle into the repository first." >&2
             exit 1
           fi
-          npm install --global "$DOCKET_PACKAGE"
+          git show "$DOCKET_ENGINE_REF:$DOCKET_ENGINE" > "$RUNNER_TEMP/docket.mjs"
+          # Printed so a run can be tied to one exact engine build.
+          sha256sum "$RUNNER_TEMP/docket.mjs"
+          echo "DOCKET=node $RUNNER_TEMP/docket.mjs" >> "$GITHUB_ENV"
 
       - name: Retrieve the passing gate evidence
         uses: actions/download-artifact@v4

@@ -30,10 +30,12 @@
     "test:unit": "vitest run src/lib",
     "test:fixture": "vitest run src/tests",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "bundle": "node scripts/bundle.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "esbuild": "^0.28.2",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   },

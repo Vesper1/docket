@@ -100,9 +100,19 @@ environment must carry required reviewers, so a candidate commit cannot reach it
 without a person approving that run. Naming an environment on a job is not by
 itself a gate.
 
-The engine is installed from a pinned reference, never resolved by name at run
-time: an unrelated `docket` package exists on the public npm registry, and a
-bare `npx docket` would execute it inside the job that holds the credential.
+The engine itself is vendored: one bundled file committed to the Salesforce
+repository at `.docket/docket.mjs`, with no registry, install step or token
+anywhere in a workflow. It is read with `git show` from the pull request's base
+commit — the same trusted-commit rule as `docket.yml` — because the candidate's
+tree is checked out into the very workspace that holds the credential, and the
+engine is executable configuration. Manually dispatched workflows read it from
+the dispatched commit, which already requires repository write access.
+
+Vendoring is a deliberate trade for the code MVP, while the engine changes
+often and few repositories consume it: it costs the fleet-wide view of which
+repository runs which engine, build provenance, and reviewable update diffs.
+Publishing the bundle to a registry becomes the better trade once the engine
+stabilizes, and changes only the materialize step and the templates README.
 
 Every operation runs in a clean isolated workspace at the exact commit SHA. A
 GitHub-hosted runner uses its fresh job workspace; the local executor creates a

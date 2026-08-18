@@ -248,48 +248,94 @@ describe('the deployment-history workflow', () => {
 });
 
 /**
- * Every workflow starts by installing the engine, and each of them is trusted
- * to install the same one. A step that installed something else — or that
- * needed a credential to do it, next to the candidate commands that run
- * afterwards — would undo the guarantees the rest of this file checks.
+ * Every workflow runs the same vendored engine, and each of them reads it out
+ * of a commit the candidate cannot write. Installing it from the workspace
+ * instead — or from a registry that needed a token, next to the candidate
+ * commands that run afterwards — would undo the guarantees the rest of this
+ * file checks.
  */
-describe('the pinned engine install', () => {
-	const TEMPLATE_NAMES = [
-		'docket-validate.yml',
-		'docket-deploy.yml',
+describe('the vendored engine', () => {
+	const PULL_REQUEST_TEMPLATES = ['docket-validate.yml', 'docket-deploy.yml'];
+	const DISPATCH_TEMPLATES = [
 		'docket-complete-step.yml',
 		'docket-rollback.yml',
 		'docket-history.yml',
 	];
+	const TEMPLATE_NAMES = [...PULL_REQUEST_TEMPLATES, ...DISPATCH_TEMPLATES];
 
-	async function installSteps(name: string): Promise<any[]> {
+	async function steps(name: string): Promise<any[]> {
 		const { jobs } = await workflow(name);
-		return Object.values(jobs as Record<string, any>)
-			.flatMap((job: any) => (job.steps ?? []) as any[])
-			.filter((step) => String(step.run ?? '').includes('npm install --global "$DOCKET_PACKAGE"'));
+		return Object.values(jobs as Record<string, any>).flatMap(
+			(job: any) => (job.steps ?? []) as any[],
+		);
 	}
 
-	test.each(TEMPLATE_NAMES)('%s refuses to run before DOCKET_PACKAGE names an engine', async (name) => {
-		const steps = await installSteps(name);
+	async function materializeSteps(name: string): Promise<any[]> {
+		return (await steps(name)).filter((step) =>
+			String(step.run ?? '').includes('git show "$DOCKET_ENGINE_REF:$DOCKET_ENGINE"'),
+		);
+	}
 
-		expect(steps.length).toBeGreaterThan(0);
-		for (const step of steps) {
-			expect(step.run).toContain('if [ -z "${DOCKET_PACKAGE:-}" ]');
+	test.each(TEMPLATE_NAMES)('%s names the vendored bundle and nothing else', async (name) => {
+		const document = await workflow(name);
+
+		expect(document.env.DOCKET_ENGINE).toBe('.docket/docket.mjs');
+		// `DOCKET` is set by the step that materializes the engine, so no step
+		// can run it before it has been read from the trusted commit.
+		expect(document.env.DOCKET).toBeUndefined();
+		expect(JSON.stringify(document)).not.toContain('DOCKET_PACKAGE');
+		expect(JSON.stringify(document)).not.toContain('npm install --global "$DOCKET_PACKAGE"');
+	});
+
+	test.each(TEMPLATE_NAMES)('%s refuses to run when the bundle is absent', async (name) => {
+		const found = await materializeSteps(name);
+
+		expect(found.length).toBeGreaterThan(0);
+		for (const step of found) {
+			expect(step.run).toContain('git cat-file -e "$DOCKET_ENGINE_REF:$DOCKET_ENGINE"');
 			expect(step.run).toContain('exit 1');
+			expect(step.run).toContain('echo "DOCKET=node $RUNNER_TEMP/docket.mjs" >> "$GITHUB_ENV"');
+			// The exact engine a run executed, recorded in its own log.
+			expect(step.run).toContain('sha256sum "$RUNNER_TEMP/docket.mjs"');
 		}
 	});
 
-	test.each(TEMPLATE_NAMES)('%s installs the engine without holding a secret', async (name) => {
-		const steps = await installSteps(name);
-
-		for (const step of steps) {
-			// A public package needs no credential, and the gate job runs
-			// candidate commands right after this step: a token here would be
-			// readable by them for the rest of the job.
-			expect(step.env).toBeUndefined();
-			expect(step.run).toContain('npm install --global "$DOCKET_PACKAGE"\n');
+	test.each(TEMPLATE_NAMES)('%s materializes the engine holding no secret', async (name) => {
+		for (const step of await materializeSteps(name)) {
+			// The gate job runs candidate commands right after this step: a token
+			// here would be readable by them for the rest of the job.
+			expect(Object.keys(step.env ?? {})).toEqual(['DOCKET_ENGINE_REF']);
 			expect(step.run).not.toContain('_authToken');
-			expect(step.run).not.toContain('NPM_CONFIG_USERCONFIG');
+			expect(step.run).not.toContain('npm install');
 		}
+	});
+
+	test.each(PULL_REQUEST_TEMPLATES)('%s reads the engine from the base commit', async (name) => {
+		const found = await materializeSteps(name);
+
+		for (const step of found) {
+			// Not `head.sha`: that tree is the candidate's, and it is checked out
+			// into the very workspace these jobs run in.
+			expect(step.env.DOCKET_ENGINE_REF).toBe('${{ github.event.pull_request.base.sha }}');
+		}
+	});
+
+	test.each(DISPATCH_TEMPLATES)('%s reads the engine from the dispatched commit', async (name) => {
+		for (const step of await materializeSteps(name)) {
+			expect(step.env.DOCKET_ENGINE_REF).toBe('${{ github.sha }}');
+		}
+	});
+
+	test.each(TEMPLATE_NAMES)('%s checks out before it reads the engine', async (name) => {
+		const all = await steps(name);
+		const checkout = all.findIndex((step) =>
+			String(step.uses ?? '').startsWith('actions/checkout'),
+		);
+		const materialize = all.findIndex((step) =>
+			String(step.run ?? '').includes('git show "$DOCKET_ENGINE_REF:$DOCKET_ENGINE"'),
+		);
+
+		expect(checkout).toBeGreaterThan(-1);
+		expect(materialize).toBeGreaterThan(checkout);
 	});
 });

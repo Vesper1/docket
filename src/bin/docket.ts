@@ -3,8 +3,19 @@ import { readFileSync } from 'node:fs';
 
 import { runCli } from '../lib/features/cli/cli.ts';
 
-const packageJson = new URL('../../package.json', import.meta.url);
-const { version } = JSON.parse(readFileSync(packageJson, 'utf8')) as { version: string };
+/**
+ * Replaced by the bundler with a string literal. The vendored engine is one
+ * file with no `package.json` beside it, so the version has to travel inside
+ * the bundle; running from source still reads the real manifest.
+ */
+declare const __DOCKET_VERSION__: string | undefined;
+
+const version =
+	typeof __DOCKET_VERSION__ === 'string'
+		? __DOCKET_VERSION__
+		: (JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
+				version: string;
+			}).version;
 
 const outcome = await runCli(process.argv.slice(2), {
 	version,

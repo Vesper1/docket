@@ -12,31 +12,68 @@ engine repository: nothing here builds a plan from the engine's own history.
 | `docket-rollback.yml` | manual dispatch | opens a compensating pull request, which then goes through validate/deploy like any other |
 | `docket-history.yml` | manual dispatch | rebuilds deployment history from run artifacts only |
 
-## Repository variable: `DOCKET_PACKAGE`
+## The vendored engine: `.docket/docket.mjs`
 
-Every workflow installs the engine with `npm install --global "$DOCKET_PACKAGE"`
-and refuses to run when the variable is empty. There is an unrelated public
-`docket` package on npm, so a bare name is never correct — the variable must
-name the exact engine this repository trusts:
+The engine is not installed from a registry. It is one bundled file committed
+to the Salesforce repository:
 
 ```text
-@vesper1/docket@0.1.0            # a published version, the normal form
-https://example.com/docket-0.1.0.tgz
-/opt/docket                      # a vendored path on a self-hosted runner
+.docket/docket.mjs        # ~430 KB, no node_modules, Node 24
 ```
 
-A git URL is deliberately not among them. `dist/` is absent from Git, so npm
-would have to build the engine inside the consumer's runner, and whether that
-build gets its devDependencies depends on the npm version and cache state. A
-published package carries `dist/` already built.
+Get it from the engine repository:
 
-The engine is published to npm by `.github/workflows/publish-engine.yml` in the
-engine repository, from a `v*` tag, with provenance: `npm view @vesper1/docket`
-shows which workflow run and commit produced the version pinned here.
+```sh
+git clone https://github.com/Vesper1/docket
+cd docket && pnpm install && pnpm bundle
+cp bundle/docket.mjs <salesforce-repo>/.docket/docket.mjs
+```
 
-The package is public, so no workflow here holds a credential to install it.
-That matters most in the `gates` job, where candidate-controlled commands run in
-the same job right after the install step.
+The last line of the file states the version it was built from, so
+`tail -1 .docket/docket.mjs` answers "what is installed here" and
+`sha256sum` ties a workflow log to one exact build.
+
+Updating the engine is a normal pull request that changes one file. Nothing
+else in the Salesforce repository moves.
+
+### Why it is read from a trusted commit, not from the workspace
+
+Every workflow materializes the engine like this:
+
+```sh
+git show "$DOCKET_ENGINE_REF:$DOCKET_ENGINE" > "$RUNNER_TEMP/docket.mjs"
+```
+
+`DOCKET_ENGINE_REF` is the pull request's **base** commit — never
+`head.sha`. The candidate's tree is checked out into the same workspace as the
+job that holds `DOCKET_SF_AUTH_URL`, so reading `.docket/docket.mjs` off the
+disk would let an unmerged commit replace the program that runs next to the
+credential. This is the rule `docket.yml` and every privileged hook already
+follow: trusted execution configuration comes from the base commit. The engine
+is executable configuration too.
+
+The manually dispatched workflows read it from `github.sha`, the commit the
+dispatch names. Dispatch already requires repository write access.
+
+No registry, no `.npmrc`, no token: the `gates` job runs candidate-controlled
+commands right after this step and must hold no credential at all.
+
+### What this trades away
+
+- **No fleet view.** Each repository carries its own copy, so nothing can
+  answer "which repositories still run the old engine" — you check them one by
+  one.
+- **No provenance.** A published package could point back at the workflow run
+  and commit that built it; a committed file cannot.
+- **Unreviewable diffs.** An engine update is 430 KB of bundled output. A
+  reviewer approves it on trust in its source, not by reading it. The
+  base-commit rule above is what keeps that from being a credential problem.
+- **Repository growth.** Every update leaves another copy in Git history
+  forever.
+
+These are acceptable while the engine changes often and lives in one or two
+repositories. Publishing to npm becomes the better trade once it stabilizes;
+only the materialize step and this file change.
 
 ## The rest of the setup
 
@@ -67,3 +104,11 @@ the same job right after the install step.
    GitHub's approval-required fallback for pull requests created with the
    repository `GITHUB_TOKEN`, so the rollback pull request is validated like
    any other.
+
+## Running the same engine locally
+
+```sh
+node .docket/docket.mjs plan --environment qa --base <sha> --head <sha>
+```
+
+Same file, same contract as the workflows.
