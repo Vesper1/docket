@@ -22,12 +22,12 @@ export interface GitCommandOptions {
 }
 
 /** Runs one git command in an isolated environment. */
-export function runGit(
+export const runGit = (
 	args: readonly string[],
 	options: GitCommandOptions,
-): Promise<ProcessResult> {
+): Promise<ProcessResult> => {
 	return runProcess('git', args, {
 		cwd: options.cwd,
 		env: { ...ISOLATED_GIT_ENV, ...options.env },
 	});
-}
+};

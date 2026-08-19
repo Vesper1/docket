@@ -40,10 +40,10 @@ export interface ComponentSet {
  * as modified, because deleting and deploying the same component in one run
  * would race and could leave the org without the class.
  */
-export function collectComponents(
+export const collectComponents = (
 	changes: readonly FileChange[],
 	options: ClassifyOptions = { sourceRoot: DEFAULT_SOURCE_ROOT },
-): Result<ComponentSet, DocketError> {
+): Result<ComponentSet, DocketError> => {
 	const deployable = new Map<string, PlannedComponent>();
 	const destructive = new Map<string, PlannedComponent>();
 
@@ -76,21 +76,21 @@ export function collectComponents(
 	}
 
 	return ok({ deployable: sorted(deployable), destructive: sorted(destructive) });
-}
+};
 
 /**
  * Several files can describe one component. When they disagree — a body edited
  * while its `-meta.xml` is added — the component as a whole is being updated.
  */
-function merge(
+const merge = (
 	existing: PlannedComponent | undefined,
 	component: MetadataComponent,
 	change: ComponentChange,
-): PlannedComponent {
+): PlannedComponent => {
 	if (existing === undefined) return { ...component, change };
 	return existing.change === change ? existing : { ...component, change: 'modified' };
-}
+};
 
-function sorted(components: Map<string, PlannedComponent>): readonly PlannedComponent[] {
+const sorted = (components: Map<string, PlannedComponent>): readonly PlannedComponent[] => {
 	return [...components.values()].sort(compareComponents);
-}
+};

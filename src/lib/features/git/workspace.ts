@@ -34,7 +34,7 @@ export interface WorkspaceRequest {
  * The result has no `.git` either, so nothing downstream can quietly consult
  * a branch instead of the commit it was given.
  */
-export async function createWorkspace(request: WorkspaceRequest): Promise<Result<Workspace, DocketError>> {
+export const createWorkspace = async (request: WorkspaceRequest): Promise<Result<Workspace, DocketError>> => {
 	const sha = parseCommitSha(request.sha, 'commit SHA', ErrorCode.gitFailed);
 	if (!sha.ok) return sha;
 
@@ -70,13 +70,13 @@ export async function createWorkspace(request: WorkspaceRequest): Promise<Result
 	await rm(archive, { force: true });
 
 	return ok({ directory, sha: sha.value, remove });
-}
+};
 
 /** Runs `work` in a fresh workspace and removes it whatever happens. */
-export async function withWorkspace<T>(
+export const withWorkspace = async <T>(
 	request: WorkspaceRequest,
 	work: (workspace: Workspace) => Promise<Result<T, DocketError>>,
-): Promise<Result<T, DocketError>> {
+): Promise<Result<T, DocketError>> => {
 	const workspace = await createWorkspace(request);
 	if (!workspace.ok) return workspace;
 
@@ -87,8 +87,6 @@ export async function withWorkspace<T>(
 		// cancellation alike.
 		await workspace.value.remove();
 	}
-}
+};
 
-function firstLine(stderr: string): string {
-	return stderr.trim().split('\n')[0] ?? '';
-}
+const firstLine = (stderr: string): string => stderr.trim().split('\n')[0] ?? '';

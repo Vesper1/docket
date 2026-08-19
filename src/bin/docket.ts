@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
 
-import { runCli } from '../lib/features/cli/cli.ts';
+import { runCli } from '../lib/features/cli/run-cli.ts';
 
 /**
  * Replaced by the bundler with a string literal. The vendored engine is one
@@ -20,8 +20,6 @@ const version =
 const outcome = await runCli(process.argv.slice(2), {
 	version,
 	cwd: process.cwd(),
-	env: process.env,
-	now: () => new Date(),
 });
 
 if (outcome.stdout !== '') process.stdout.write(outcome.stdout);

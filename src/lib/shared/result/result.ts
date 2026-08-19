@@ -17,18 +17,10 @@ export interface Err<E> {
 	readonly error: E;
 }
 
-export function ok<T>(value: T): Ok<T> {
-	return { ok: true, value };
-}
+export const ok = <T>(value: T): Ok<T> => ({ ok: true, value });
 
-export function err<E>(error: E): Err<E> {
-	return { ok: false, error };
-}
+export const err = <E>(error: E): Err<E> => ({ ok: false, error });
 
-export function isOk<T, E>(result: Result<T, E>): result is Ok<T> {
-	return result.ok;
-}
+export const isOk = <T, E>(result: Result<T, E>): result is Ok<T> => result.ok;
 
-export function isErr<T, E>(result: Result<T, E>): result is Err<E> {
-	return !result.ok;
-}
+export const isErr = <T, E>(result: Result<T, E>): result is Err<E> => !result.ok;

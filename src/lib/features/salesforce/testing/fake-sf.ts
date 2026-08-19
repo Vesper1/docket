@@ -37,7 +37,7 @@ export interface FakeSfBehaviour {
 	readonly hang?: boolean;
 }
 
-export async function createFakeSf(behaviour: FakeSfBehaviour): Promise<FakeSf> {
+export const createFakeSf = async (behaviour: FakeSfBehaviour): Promise<FakeSf> => {
 	const directory = await mkdtemp(join(tmpdir(), 'docket-sf-'));
 	const executable = join(directory, 'sf');
 	const log = join(directory, 'invocations.log');
@@ -86,7 +86,7 @@ export async function createFakeSf(behaviour: FakeSfBehaviour): Promise<FakeSf> 
 }
 
 /** A connected org, shaped like `sf org display --json`. */
-export function orgDisplay(id = '00D000000000001EAA'): string {
+export const orgDisplay = (id = '00D000000000001EAA'): string => {
 	return JSON.stringify({
 		status: 0,
 		result: {
@@ -96,10 +96,10 @@ export function orgDisplay(id = '00D000000000001EAA'): string {
 			connectedStatus: 'Connected',
 		},
 	});
-}
+};
 
 /** A successful validation or deployment, shaped like the CLI's own output. */
-export function successfulDeployment(overrides: Record<string, unknown> = {}): string {
+export const successfulDeployment = (overrides: Record<string, unknown> = {}): string => {
 	return JSON.stringify({
 		status: 0,
 		result: {
@@ -115,10 +115,10 @@ export function successfulDeployment(overrides: Record<string, unknown> = {}): s
 			...overrides,
 		},
 	});
-}
+};
 
 /** A deployment Salesforce rejected: one component and one test failed. */
-export function failedDeployment(): string {
+export const failedDeployment = (): string => {
 	return JSON.stringify({
 		status: 1,
 		name: 'DeployFailed',
@@ -146,4 +146,4 @@ export function failedDeployment(): string {
 			},
 		},
 	});
-}
+};

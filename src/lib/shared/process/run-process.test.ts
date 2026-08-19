@@ -3,9 +3,7 @@ import { describe, expect, test } from 'vitest';
 import { runProcess } from './run-process.ts';
 
 /** Runs a snippet in this Node, which every machine that runs the tests has. */
-function node(source: string, options = {}) {
-	return runProcess(process.execPath, ['-e', source], options);
-}
+const node = (source: string, options = {}) => runProcess(process.execPath, ['-e', source], options);
 
 describe('running a command', () => {
 	test('captures stdout, stderr and the exit code', async () => {

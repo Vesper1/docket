@@ -1,412 +1,116 @@
 import { describe, expect, test } from 'vitest';
 
-import { ErrorCode } from '../../shared/result/docket-error.ts';
-import { isErr, isOk, ok } from '../../shared/result/result.ts';
-import { parseConfig } from './parse-config.ts';
-import { requireTargetBranch, selectEnvironment } from './select-environment.ts';
+import { parseConfig } from './config.ts';
 
-const QA = `
-version: 1
-environments:
-  qa:
-    branch: main
-    org: docket-qa
-    allowDestructiveChanges: false
-    tests:
-      mode: all
-`;
+const MINIMAL = ['version: 1', 'org: docket-qa', ''].join('\n');
 
-/** Parses config a test already knows is valid, so the test stays readable. */
-function config(text: string) {
-	const result = parseConfig(text);
-	if (!isOk(result)) throw new Error(`expected valid config: ${JSON.stringify(result)}`);
-	return result.value;
-}
+/** The message matters less than the refusal, so assertions check the code. */
+const rejects = (yaml: string): string => {
+	const result = parseConfig(yaml);
+	expect(result.ok).toBe(false);
+	return result.ok ? '' : result.error.code;
+};
 
-function codeOf(text: string) {
-	const result = parseConfig(text);
-	return isErr(result) ? result.error.code : undefined;
-}
+describe('a minimal file', () => {
+	test('needs only a version and an org', () => {
+		const result = parseConfig(MINIMAL);
 
-describe('a QA environment', () => {
-	test('normalizes to an exact snapshot', () => {
-		expect(parseConfig(QA)).toEqual(
-			ok({
-				version: 1,
-				sourceRoot: 'force-app',
-				apiVersion: '62.0',
-				environments: [
-					{
-						id: 'qa',
-						branch: 'main',
-						org: 'docket-qa',
-						allowDestructiveChanges: false,
-						tests: { mode: 'all' },
-						gates: [],
-						preDeployment: [],
-						postDeployment: [],
-					},
-				],
-			}),
-		);
+		expect(result.ok).toBe(true);
+		if (!result.ok) return;
+
+		expect(result.value).toEqual({
+			version: 1,
+			sourceRoot: 'force-app',
+			org: 'docket-qa',
+			tests: { mode: 'all' },
+			allowDestructiveChanges: false,
+			gates: [],
+		});
 	});
 
-	test('the source root and API version are overridable', () => {
-		const parsed = config(`${QA}\nsourceRoot: packages/core\napiVersion: "64.0"\n`);
+	/** Deletions fail closed: enabling them has to be a deliberate edit. */
+	test('does not permit deletions by default', () => {
+		const result = parseConfig(MINIMAL);
 
-		expect(parsed.sourceRoot).toBe('packages/core');
-		expect(parsed.apiVersion).toBe('64.0');
-	});
-
-	test('environments come out sorted, so the snapshot does not depend on file order', () => {
-		const two = config(`
-version: 1
-environments:
-  qa:
-    branch: main
-    org: docket-qa
-    allowDestructiveChanges: false
-    tests: { mode: all }
-  integration:
-    branch: develop
-    org: docket-int
-    allowDestructiveChanges: false
-    tests: { mode: all }
-`);
-
-		expect(two.environments.map((environment) => environment.id)).toEqual(['integration', 'qa']);
-	});
-
-	test('a file that is not a mapping, or has no environments, is refused', () => {
-		expect(codeOf('- one\n- two\n')).toBe(ErrorCode.invalidConfig);
-		expect(codeOf('version: 1\nenvironments: {}\n')).toBe(ErrorCode.invalidConfig);
-		expect(codeOf('version: 2\nenvironments:\n  qa: {}\n')).toBe(ErrorCode.invalidConfig);
-		expect(codeOf('version: 1\nenvironments:\n  qa: [oops]\n')).toBe(ErrorCode.invalidConfig);
-	});
-
-	test('a missing branch or org is refused, never defaulted', () => {
-		expect(
-			codeOf(`
-version: 1
-environments:
-  qa:
-    org: docket-qa
-    allowDestructiveChanges: false
-    tests: { mode: all }
-`),
-		).toBe(ErrorCode.invalidConfig);
-	});
-
-	test('a key Docket does not know is a typo, not an extension point', () => {
-		expect(codeOf(`${QA}\nunexpected: true\n`)).toBe(ErrorCode.invalidConfig);
-		expect(
-			codeOf(`
-version: 1
-environments:
-  qa:
-    branch: main
-    org: docket-qa
-    allowDestructiveChange: false
-    tests: { mode: all }
-`),
-		).toBe(ErrorCode.invalidConfig);
+		expect(result.ok && result.value.allowDestructiveChanges).toBe(false);
 	});
 });
 
-describe('the destructive-change policy', () => {
-	function policy(value: string) {
-		return codeOf(`
-version: 1
-environments:
-  qa:
-    branch: main
-    org: docket-qa
-    allowDestructiveChanges: ${value}
-    tests: { mode: all }
-`);
-	}
-
-	test('real YAML booleans are accepted', () => {
-		const enabled = config(`
-version: 1
-environments:
-  qa:
-    branch: main
-    org: docket-qa
-    allowDestructiveChanges: true
-    tests: { mode: all }
-`);
-
-		expect(enabled.environments[0]?.allowDestructiveChanges).toBe(true);
-		expect(policy('false')).toBeUndefined();
+describe('what it refuses', () => {
+	test('an unknown key, rather than defaulting it away', () => {
+		// One letter short of `allowDestructiveChanges` would otherwise read as a
+		// silent `false`.
+		expect(rejects(`${MINIMAL}allowDestructiveChange: true\n`)).toBe('invalid_config');
 	});
 
-	test('anything that merely looks like a boolean is refused', () => {
-		for (const value of ['"true"', "'false'", 'yes', 'on', 'Y', '1', '~']) {
-			expect(policy(value)).toBe(ErrorCode.invalidConfig);
-		}
+	test('a quoted boolean, which is a string and not a policy', () => {
+		expect(rejects(`${MINIMAL}allowDestructiveChanges: "true"\n`)).toBe('invalid_config');
 	});
 
-	test('an absent policy is refused rather than assumed', () => {
-		expect(
-			codeOf(`
-version: 1
-environments:
-  qa:
-    branch: main
-    org: docket-qa
-    tests: { mode: all }
-`),
-		).toBe(ErrorCode.invalidConfig);
+	test('a missing org, so no run can guess where to deploy', () => {
+		expect(rejects('version: 1\n')).toBe('invalid_config');
+	});
+
+	test('a version it does not understand', () => {
+		expect(rejects('version: 2\norg: docket-qa\n')).toBe('invalid_config');
+	});
+
+	test('an empty test list, which would silently mean every test in the org', () => {
+		expect(rejects(`${MINIMAL}tests: []\n`)).toBe('invalid_config');
+	});
+
+	test('two gates sharing a name, because a result could not be attributed', () => {
+		const duplicated = [
+			MINIMAL,
+			'gates:',
+			'  - name: unit',
+			'    run: exit 0',
+			'  - name: unit',
+			'    run: exit 1',
+			'',
+		].join('\n');
+
+		expect(rejects(duplicated)).toBe('invalid_config');
+	});
+
+	test('a gate with no command to run', () => {
+		expect(rejects(`${MINIMAL}gates:\n  - name: unit\n`)).toBe('invalid_config');
+	});
+
+	test('text that is not YAML at all', () => {
+		expect(rejects('version: 1\n  org: [unclosed\n')).toBe('invalid_config');
 	});
 });
 
 describe('test selection', () => {
-	function tests(block: string) {
-		return `
-version: 1
-environments:
-  qa:
-    branch: main
-    org: docket-qa
-    allowDestructiveChanges: false
-    tests:
-${block}
-`;
-	}
-
-	test('all-tests mode parses to the all mode', () => {
-		expect(config(tests('      mode: all')).environments[0]?.tests).toEqual({ mode: 'all' });
+	test('`all` is the default and the word both mean the same thing', () => {
+		expect(parseConfig(MINIMAL)).toEqual(parseConfig(`${MINIMAL}tests: all\n`));
 	});
 
-	test('an explicit list parses in the order it was written', () => {
-		const parsed = config(
-			tests('      mode: specified\n      classes:\n        - FooTest\n        - BarTest'),
-		);
+	test('an explicit list is kept in the order it was written', () => {
+		const result = parseConfig(`${MINIMAL}tests: [BillingTest, GreeterTest]\n`);
 
-		expect(parsed.environments[0]?.tests).toEqual({
+		expect(result.ok && result.value.tests).toEqual({
 			mode: 'specified',
-			classes: ['FooTest', 'BarTest'],
+			classes: ['BillingTest', 'GreeterTest'],
 		});
 	});
-
-	test('an empty or malformed list fails', () => {
-		expect(codeOf(tests('      mode: specified\n      classes: []'))).toBe(ErrorCode.invalidConfig);
-		expect(codeOf(tests('      mode: specified'))).toBe(ErrorCode.invalidConfig);
-		expect(codeOf(tests('      mode: specified\n      classes: FooTest'))).toBe(
-			ErrorCode.invalidConfig,
-		);
-		expect(codeOf(tests('      mode: specified\n      classes:\n        - 7'))).toBe(
-			ErrorCode.invalidConfig,
-		);
-		expect(codeOf(tests('      mode: everything'))).toBe(ErrorCode.invalidConfig);
-	});
-
-	test('a class list under all-tests mode is a contradiction, not a hint', () => {
-		expect(codeOf(tests('      mode: all\n      classes: [FooTest]'))).toBe(ErrorCode.invalidConfig);
-	});
 });
 
-describe('gates and deployment steps', () => {
-	const WITH_STEPS = `
-version: 1
-environments:
-  qa:
-    branch: main
-    org: docket-qa
-    allowDestructiveChanges: false
-    tests: { mode: all }
-    gates:
-      - name: eslint
-        run: npm run lint
-      - name: pmd
-        run: ./scripts/pmd.sh
-        timeoutMinutes: 20
-    preDeployment:
-      - name: announce
-        run: ./scripts/announce.sh
-      - name: release-window
-        manual: true
-        instructions: Confirm the release window with the team lead
-    postDeployment:
-      - name: smoke
-        run: ./scripts/smoke.sh
-`;
+describe('gates', () => {
+	test('carry a default timeout, so a hanging command cannot run forever', () => {
+		const result = parseConfig(`${MINIMAL}gates:\n  - name: unit\n    run: npm test\n`);
 
-	test('gates keep their order, command and timeout', () => {
-		const environment = config(WITH_STEPS).environments[0];
-
-		expect(environment?.gates).toEqual([
-			{ name: 'eslint', run: 'npm run lint', timeoutMinutes: 10 },
-			{ name: 'pmd', run: './scripts/pmd.sh', timeoutMinutes: 20 },
+		expect(result.ok && result.value.gates).toEqual([
+			{ name: 'unit', run: 'npm test', timeoutMinutes: 10 },
 		]);
 	});
 
-	test('automatic and manual steps live in one ordered list', () => {
-		const environment = config(WITH_STEPS).environments[0];
+	test('accept an explicit timeout', () => {
+		const result = parseConfig(
+			`${MINIMAL}gates:\n  - name: unit\n    run: npm test\n    timeoutMinutes: 2\n`,
+		);
 
-		expect(environment?.preDeployment).toEqual([
-			{ kind: 'automatic', name: 'announce', run: './scripts/announce.sh', timeoutMinutes: 10 },
-			{
-				kind: 'manual',
-				name: 'release-window',
-				instructions: 'Confirm the release window with the team lead',
-			},
-		]);
-		expect(environment?.postDeployment).toEqual([
-			{ kind: 'automatic', name: 'smoke', run: './scripts/smoke.sh', timeoutMinutes: 10 },
-		]);
-	});
-
-	test('an environment without steps has empty lists, not undefined ones', () => {
-		const environment = config(QA).environments[0];
-
-		expect(environment?.gates).toEqual([]);
-		expect(environment?.preDeployment).toEqual([]);
-		expect(environment?.postDeployment).toEqual([]);
-	});
-
-	test('a step that is neither runnable nor explainable is refused', () => {
-		const bare = `
-version: 1
-environments:
-  qa:
-    branch: main
-    org: docket-qa
-    allowDestructiveChanges: false
-    tests: { mode: all }
-    preDeployment:
-      - name: mystery
-`;
-		expect(codeOf(bare)).toBe(ErrorCode.invalidConfig);
-	});
-
-	test('a manual step cannot also be a command', () => {
-		const both = `
-version: 1
-environments:
-  qa:
-    branch: main
-    org: docket-qa
-    allowDestructiveChanges: false
-    tests: { mode: all }
-    preDeployment:
-      - name: mystery
-        manual: true
-        instructions: do the thing
-        run: ./do-the-thing.sh
-`;
-		expect(codeOf(both)).toBe(ErrorCode.invalidConfig);
-	});
-
-	test('a manual post-deployment step is refused until the workflow can resume it safely', () => {
-		const post = `
-version: 1
-environments:
-  qa:
-    branch: main
-    org: docket-qa
-    allowDestructiveChanges: false
-    tests: { mode: all }
-    postDeployment:
-      - name: verify
-        manual: true
-        instructions: Verify the deployment
-`;
-		expect(codeOf(post)).toBe(ErrorCode.invalidConfig);
-	});
-
-	test('two steps cannot share a name, because results are recorded by name', () => {
-		const clash = `
-version: 1
-environments:
-  qa:
-    branch: main
-    org: docket-qa
-    allowDestructiveChanges: false
-    tests: { mode: all }
-    preDeployment:
-      - name: announce
-        run: ./a.sh
-      - name: announce
-        run: ./b.sh
-`;
-		expect(codeOf(clash)).toBe(ErrorCode.invalidConfig);
-	});
-
-	test('two gates cannot share a name, because their logs would overwrite each other', () => {
-		const clash = `
-version: 1
-environments:
-  qa:
-    branch: main
-    org: docket-qa
-    allowDestructiveChanges: false
-    tests: { mode: all }
-    gates:
-      - name: lint
-        run: npm run lint
-      - name: lint
-        run: npm run lint:strict
-`;
-		expect(codeOf(clash)).toBe(ErrorCode.invalidConfig);
-	});
-
-	test('gate and step names cannot become paths', () => {
-		const unsafe = `
-version: 1
-environments:
-  qa:
-    branch: main
-    org: docket-qa
-    allowDestructiveChanges: false
-    tests: { mode: all }
-    gates:
-      - name: ../../outside
-        run: exit 0
-`;
-		expect(codeOf(unsafe)).toBe(ErrorCode.invalidConfig);
-	});
-
-	test('a timeout that is not a positive whole number is refused', () => {
-		const bad = `
-version: 1
-environments:
-  qa:
-    branch: main
-    org: docket-qa
-    allowDestructiveChanges: false
-    tests: { mode: all }
-    gates:
-      - name: eslint
-        run: npm run lint
-        timeoutMinutes: 0
-`;
-		expect(codeOf(bad)).toBe(ErrorCode.invalidConfig);
-	});
-});
-
-describe('choosing the environment of a run', () => {
-	test('a configured id resolves to its environment', () => {
-		const environment = selectEnvironment(config(QA), 'qa');
-
-		expect(isOk(environment) && environment.value.org).toBe('docket-qa');
-	});
-
-	test('an unknown id is refused and names what exists', () => {
-		const result = selectEnvironment(config(QA), 'prod');
-
-		expect(isErr(result) && result.error.code).toBe(ErrorCode.unknownEnvironment);
-		expect(isErr(result) && result.error.message).toContain('qa');
-	});
-
-	test('the pull request must target the branch the environment deploys', () => {
-		const environment = config(QA).environments[0];
-		if (environment === undefined) throw new Error('fixture has no environment');
-
-		expect(isOk(requireTargetBranch(environment, 'main'))).toBe(true);
-
-		const wrong = requireTargetBranch(environment, 'release/2026-09');
-		expect(isErr(wrong) && wrong.error.code).toBe(ErrorCode.branchMismatch);
+		expect(result.ok && result.value.gates[0]?.timeoutMinutes).toBe(2);
 	});
 });

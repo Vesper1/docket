@@ -24,9 +24,9 @@ export interface ChangeRequest {
  * is read, so uncommitted or untracked files in a local workspace cannot reach
  * a deployment plan.
  */
-export async function readChanges(
+export const readChanges = async (
 	request: ChangeRequest,
-): Promise<Result<readonly FileChange[], DocketError>> {
+): Promise<Result<readonly FileChange[], DocketError>> => {
 	const base = parseCommitSha(request.baseSha, 'base SHA', ErrorCode.gitFailed);
 	if (!base.ok) return base;
 	const head = parseCommitSha(request.headSha, 'head SHA', ErrorCode.gitFailed);
@@ -60,7 +60,7 @@ export async function readChanges(
 	}
 
 	return parseNameStatus(result.stdout);
-}
+};
 
 /**
  * git's status letters, mapped only as far as Docket can honestly classify
@@ -80,7 +80,7 @@ const STATUS_BY_LETTER: Readonly<Record<string, ChangeStatus>> = {
  * where the marker carries a similarity score (`R100`) and is followed by the
  * old path and then the new one.
  */
-function parseNameStatus(stdout: string): Result<readonly FileChange[], DocketError> {
+const parseNameStatus = (stdout: string): Result<readonly FileChange[], DocketError> => {
 	// Every field is NUL-terminated, so the split leaves one empty tail field.
 	const fields = stdout.split('\0');
 	if (fields.at(-1) === '') fields.pop();
@@ -114,13 +114,11 @@ function parseNameStatus(stdout: string): Result<readonly FileChange[], DocketEr
 	}
 
 	return ok(changes);
-}
+};
 
-function incompleteRecord(): DocketError {
+const incompleteRecord = (): DocketError => {
 	return docketError(ErrorCode.gitFailed, 'git diff produced an incomplete record');
-}
+};
 
 /** git states the diagnosis on the first line and adds advice below it. */
-function firstLine(stderr: string): string {
-	return stderr.trim().split('\n')[0] ?? '';
-}
+const firstLine = (stderr: string): string => stderr.trim().split('\n')[0] ?? '';

@@ -21,7 +21,7 @@ export interface FileAtCommit {
  * run with deployment credentials. Reading it from the working tree instead
  * would hand that power to whoever opened the pull request.
  */
-export async function readFileAtCommit(request: FileAtCommit): Promise<Result<string, DocketError>> {
+export const readFileAtCommit = async (request: FileAtCommit): Promise<Result<string, DocketError>> => {
 	const sha = parseCommitSha(request.sha, 'commit SHA', ErrorCode.gitFailed);
 	if (!sha.ok) return sha;
 
@@ -39,8 +39,6 @@ export async function readFileAtCommit(request: FileAtCommit): Promise<Result<st
 	}
 
 	return ok(result.stdout);
-}
+};
 
-function firstLine(stderr: string): string {
-	return stderr.trim().split('\n')[0] ?? '';
-}
+const firstLine = (stderr: string): string => stderr.trim().split('\n')[0] ?? '';

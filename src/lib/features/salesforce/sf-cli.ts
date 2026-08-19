@@ -53,10 +53,10 @@ export interface SfEnvelope {
  * the most valuable thing in the run. Only an unreadable answer — no JSON at
  * all, a killed process — is a `salesforce_failed`.
  */
-export async function runSf(
+export const runSf = async (
 	cli: SalesforceCli,
 	args: readonly string[],
-): Promise<Result<SfEnvelope, DocketError>> {
+): Promise<Result<SfEnvelope, DocketError>> => {
 	const result = await runProcess(cli.executable, [...args, '--json'], {
 		cwd: cli.cwd,
 		env: ISOLATED_SF_ENV,
@@ -91,19 +91,19 @@ export async function runSf(
 	}
 
 	return ok({ ...parsed, exitCode: result.exitCode });
-}
+};
 
-function terminationMessage(args: readonly string[], reason: TerminationReason): string {
+const terminationMessage = (args: readonly string[], reason: TerminationReason): string => {
 	const cause = reason === 'timeout' ? 'timed out' : 'was cancelled';
 	return `sf ${args.join(' ')} ${cause}; Salesforce may still be processing the request`;
-}
+};
 
 /**
  * The CLI is supposed to print one JSON document and nothing else, but a shell
  * profile or a plugin warning can prepend a line. Recover the document rather
  * than lose a whole deployment result to someone's `.zshrc`.
  */
-function parseEnvelope(stdout: string): Omit<SfEnvelope, 'exitCode'> | undefined {
+const parseEnvelope = (stdout: string): Omit<SfEnvelope, 'exitCode'> | undefined => {
 	const document = extractJson(stdout);
 	if (document === undefined) return undefined;
 
@@ -116,9 +116,9 @@ function parseEnvelope(stdout: string): Omit<SfEnvelope, 'exitCode'> | undefined
 		message: typeof document['message'] === 'string' ? document['message'] : undefined,
 		name: typeof document['name'] === 'string' ? document['name'] : undefined,
 	};
-}
+};
 
-function extractJson(stdout: string): Record<string, unknown> | undefined {
+const extractJson = (stdout: string): Record<string, unknown> | undefined => {
 	const start = stdout.indexOf('{');
 	const end = stdout.lastIndexOf('}');
 	if (start === -1 || end < start) return undefined;
@@ -131,8 +131,6 @@ function extractJson(stdout: string): Record<string, unknown> | undefined {
 	} catch {
 		return undefined;
 	}
-}
+};
 
-function firstLine(value: string): string {
-	return value.trim().split('\n')[0] ?? '';
-}
+const firstLine = (value: string): string => value.trim().split('\n')[0] ?? '';

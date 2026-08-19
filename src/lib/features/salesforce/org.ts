@@ -24,10 +24,10 @@ export interface ResolvedOrg {
  * what a plan is bound to. Resolving it once, up front, is what makes "deploy
  * only to the org that was validated" a checkable statement.
  */
-export async function resolveOrg(
+export const resolveOrg = async (
 	cli: SalesforceCli,
 	reference: string,
-): Promise<Result<ResolvedOrg, DocketError>> {
+): Promise<Result<ResolvedOrg, DocketError>> => {
 	const envelope = await runSf(cli, ['org', 'display', '--target-org', reference]);
 	if (!envelope.ok) return envelope;
 
@@ -60,7 +60,7 @@ export async function resolveOrg(
 	}
 
 	return ok({ reference, id: id.value, username, instanceUrl: string(org['instanceUrl']) ?? '' });
-}
+};
 
 /**
  * Refuses an org that is not the one a plan was validated against.
@@ -68,7 +68,7 @@ export async function resolveOrg(
  * The alias may be identical and still resolve elsewhere — a re-authenticated
  * sandbox, a refreshed org, a laptop with different local aliases.
  */
-export function requireOrgId(org: ResolvedOrg, expectedId: string): Result<ResolvedOrg, DocketError> {
+export const requireOrgId = (org: ResolvedOrg, expectedId: string): Result<ResolvedOrg, DocketError> => {
 	if (org.id === expectedId) return ok(org);
 
 	return err(
@@ -77,8 +77,8 @@ export function requireOrgId(org: ResolvedOrg, expectedId: string): Result<Resol
 			`org \`${org.reference}\` is ${org.id}, but the plan was validated against ${expectedId}`,
 		),
 	);
-}
+};
 
-function string(value: unknown): string | undefined {
+const string = (value: unknown): string | undefined => {
 	return typeof value === 'string' && value !== '' ? value : undefined;
-}
+};

@@ -7,28 +7,14 @@
     "type": "git",
     "url": "git+https://github.com/Vesper1/docket.git"
   },
-  "publishConfig": {
-    "access": "public"
-  },
   "type": "module",
-  "bin": {
-    "docket": "./dist/bin/docket.js"
-  },
-  "files": [
-    "dist",
-    "templates"
-  ],
   "packageManager": "pnpm@11.15.0",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
     "docket": "node src/bin/docket.ts",
-    "prepack": "npm run build",
     "test": "vitest run",
-    "test:unit": "vitest run src/lib",
-    "test:fixture": "vitest run src/tests",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "bundle": "node scripts/bundle.mjs"

@@ -52,11 +52,11 @@ const GRACE_MS = 2_000;
  * A non-zero exit is a normal outcome here, not an exception: the caller
  * decides what it means.
  */
-export function runProcess(
+export const runProcess = (
 	command: string,
 	args: readonly string[],
 	options: RunProcessOptions = {},
-): Promise<ProcessResult> {
+): Promise<ProcessResult> => {
 	return new Promise((resolve) => {
 		let child: ChildProcessWithoutNullStreams;
 		try {
@@ -122,24 +122,22 @@ export function runProcess(
 			});
 		});
 	});
-}
+};
 
-function startFailure(error: unknown): ProcessResult {
+const startFailure = (error: unknown): ProcessResult => {
 	return { stdout: '', stderr: '', exitCode: 127, terminatedBy: null, startError: messageOf(error) };
-}
+};
 
-function messageOf(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
-}
+const messageOf = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
-function environmentOf(options: RunProcessOptions): NodeJS.ProcessEnv {
+const environmentOf = (options: RunProcessOptions): NodeJS.ProcessEnv => {
 	if (options.env === undefined && options.removeEnv === undefined) return process.env;
 
 	const environment = { ...process.env, ...options.env };
 	for (const name of options.removeEnv ?? []) delete environment[name];
 
 	return environment;
-}
+};
 
 /**
  * A signalled process reports no exit code of its own. Any signal collapses to
@@ -147,6 +145,4 @@ function environmentOf(options: RunProcessOptions): NodeJS.ProcessEnv {
  * Docket stopped the process and why, and nothing here branches on which signal
  * it took to stop it.
  */
-function terminationCode(signal: NodeJS.Signals | null): number {
-	return signal === null ? 1 : 128;
-}
+const terminationCode = (signal: NodeJS.Signals | null): number => signal === null ? 1 : 128;

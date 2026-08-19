@@ -1,8 +1,9 @@
+import { asRecord } from '../../shared/json/read-json.ts';
 import { docketError, ErrorCode } from '../../shared/result/docket-error.ts';
 import type { DocketError } from '../../shared/result/docket-error.ts';
 import { err, ok } from '../../shared/result/result.ts';
 import type { Result } from '../../shared/result/result.ts';
-import type { TestSelection } from '../config/docket-config.ts';
+import type { TestSelection } from '../config/config.ts';
 import { runSf } from './sf-cli.ts';
 import type { SalesforceCli } from './sf-cli.ts';
 
@@ -62,7 +63,7 @@ export interface TestFailure {
  * deployment must be able to prove it used the manifests and test selection
  * that validation approved.
  */
-export function deployArgs(mode: DeployMode, request: DeployRequest): readonly string[] {
+export const deployArgs = (mode: DeployMode, request: DeployRequest): readonly string[] => {
 	const args = [
 		'project',
 		'deploy',
@@ -91,7 +92,7 @@ export function deployArgs(mode: DeployMode, request: DeployRequest): readonly s
 	}
 
 	return args;
-}
+};
 
 /**
  * Runs the deployment and reads back what Salesforce did.
@@ -100,11 +101,11 @@ export function deployArgs(mode: DeployMode, request: DeployRequest): readonly s
  * the run must record the component and test failures, and a thrown-away error
  * string would lose exactly the detail a developer needs.
  */
-export async function runDeployment(
+export const runDeployment = async (
 	cli: SalesforceCli,
 	mode: DeployMode,
 	request: DeployRequest,
-): Promise<Result<DeploymentOutcome, DocketError>> {
+): Promise<Result<DeploymentOutcome, DocketError>> => {
 	const envelope = await runSf(cli, deployArgs(mode, request));
 	if (!envelope.ok) return envelope;
 
@@ -173,9 +174,9 @@ export async function runDeployment(
 		componentFailures: componentFailures(details['componentFailures']),
 		tests: testOutcome(details['runTestResult']),
 	});
-}
+};
 
-function componentFailures(raw: unknown): readonly ComponentFailure[] {
+const componentFailures = (raw: unknown): readonly ComponentFailure[] => {
 	return asArray(raw).flatMap((entry) => {
 		const failure = asRecord(entry);
 		if (failure === undefined) return [];
@@ -188,9 +189,9 @@ function componentFailures(raw: unknown): readonly ComponentFailure[] {
 			},
 		];
 	});
-}
+};
 
-function testOutcome(raw: unknown): TestOutcome {
+const testOutcome = (raw: unknown): TestOutcome => {
 	const tests = asRecord(raw);
 	if (tests === undefined) return { run: 0, failed: 0, failures: [] };
 
@@ -210,24 +211,16 @@ function testOutcome(raw: unknown): TestOutcome {
 			];
 		}),
 	};
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-	return typeof value === 'object' && value !== null && !Array.isArray(value)
-		? (value as Record<string, unknown>)
-		: undefined;
-}
+};
 
 /** Salesforce collapses a one-element list into the element itself. */
-function asArray(value: unknown): readonly unknown[] {
+const asArray = (value: unknown): readonly unknown[] => {
 	if (Array.isArray(value)) return value;
 	return value === undefined || value === null ? [] : [value];
-}
+};
 
-function text(value: unknown): string {
-	return typeof value === 'string' ? value : '';
-}
+const text = (value: unknown): string => typeof value === 'string' ? value : '';
 
-function count(value: unknown): number {
+const count = (value: unknown): number => {
 	return typeof value === 'number' && Number.isFinite(value) ? value : 0;
-}
+};

@@ -34,7 +34,7 @@ export interface GitFixtureInput {
  * Commit identity is pinned so a fixture is reproducible, but tests must still
  * treat the SHAs as opaque.
  */
-export async function createGitFixture(input: GitFixtureInput): Promise<GitFixture> {
+export const createGitFixture = async (input: GitFixtureInput): Promise<GitFixture> => {
 	const directory = await mkdtemp(join(tmpdir(), 'docket-git-'));
 
 	try {
@@ -55,7 +55,7 @@ export async function createGitFixture(input: GitFixtureInput): Promise<GitFixtu
 		await rm(directory, { recursive: true, force: true });
 		throw error;
 	}
-}
+};
 
 /**
  * Fixed author, committer and dates. Without these the fixture would inherit
@@ -71,32 +71,32 @@ const FIXED_IDENTITY = {
 	GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z',
 } as const;
 
-async function git(cwd: string, args: readonly string[]): Promise<string> {
+const git = async (cwd: string, args: readonly string[]): Promise<string> => {
 	const result = await runGit(args, { cwd, env: FIXED_IDENTITY });
 	if (result.exitCode !== 0) {
 		throw new Error(`git ${args.join(' ')} failed (${result.exitCode}): ${result.stderr.trim()}`);
 	}
 	return result.stdout;
-}
+};
 
-async function writeTree(directory: string, tree: TreeSnapshot): Promise<void> {
+const writeTree = async (directory: string, tree: TreeSnapshot): Promise<void> => {
 	for (const [path, contents] of Object.entries(tree)) {
 		const absolute = join(directory, path);
 		await mkdir(dirname(absolute), { recursive: true });
 		await writeFile(absolute, contents, 'utf8');
 	}
-}
+};
 
 /** Turns the base tree into the head tree, removing whatever head dropped. */
-async function applyTree(directory: string, base: TreeSnapshot, head: TreeSnapshot): Promise<void> {
+const applyTree = async (directory: string, base: TreeSnapshot, head: TreeSnapshot): Promise<void> => {
 	for (const path of Object.keys(base)) {
 		if (!(path in head)) await rm(join(directory, path), { force: true });
 	}
 	await writeTree(directory, head);
-}
+};
 
-async function commit(directory: string, message: string): Promise<string> {
+const commit = async (directory: string, message: string): Promise<string> => {
 	await git(directory, ['add', '--all']);
 	await git(directory, ['commit', '--quiet', '--allow-empty', '--message', message]);
 	return (await git(directory, ['rev-parse', 'HEAD'])).trim();
-}
+};

@@ -65,6 +65,4 @@ export interface DocketError {
 	readonly message: string;
 }
 
-export function docketError(code: ErrorCode, message: string): DocketError {
-	return { code, message };
-}
+export const docketError = (code: ErrorCode, message: string): DocketError => ({ code, message });

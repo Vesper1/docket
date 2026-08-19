@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from 'vitest';
 
 import { ErrorCode } from '../../shared/result/docket-error.ts';
-import { isErr, isOk } from '../../shared/result/result.ts';
+import {isOk} from '../../shared/result/result.ts';
+import { errorOf } from '../../shared/result/testing/expect-result.ts';
 import { deployArgs, runDeployment } from './deploy.ts';
 import type { DeployRequest } from './deploy.ts';
 import { requireOrgId, resolveOrg } from './org.ts';
@@ -23,10 +24,10 @@ afterEach(async () => {
 	fake = undefined;
 });
 
-async function cliFor(behaviour: FakeSfBehaviour) {
+const cliFor = async (behaviour: FakeSfBehaviour) => {
 	fake = await createFakeSf(behaviour);
 	return { executable: fake.executable, cwd: process.cwd() };
-}
+};
 
 describe('the deployment arguments', () => {
 	test('a validation checks without changing the org', () => {
@@ -132,7 +133,7 @@ describe('running a validation', () => {
 
 		const result = await runDeployment(cli, 'validate', REQUEST);
 
-		expect(isErr(result) && result.error.code).toBe(ErrorCode.salesforceFailed);
+		expect(errorOf(result).code).toBe(ErrorCode.salesforceFailed);
 	});
 
 	test('a deployment response that claims check-only is refused', async () => {
@@ -140,7 +141,7 @@ describe('running a validation', () => {
 
 		const result = await runDeployment(cli, 'deploy', REQUEST);
 
-		expect(isErr(result) && result.error.code).toBe(ErrorCode.salesforceFailed);
+		expect(errorOf(result).code).toBe(ErrorCode.salesforceFailed);
 	});
 
 	test('a successful result with a failing process exit is contradictory', async () => {
@@ -148,7 +149,7 @@ describe('running a validation', () => {
 
 		const result = await runDeployment(cli, 'validate', REQUEST);
 
-		expect(isErr(result) && result.error.code).toBe(ErrorCode.salesforceFailed);
+		expect(errorOf(result).code).toBe(ErrorCode.salesforceFailed);
 	});
 
 	test('a successful result with a failing envelope status is contradictory', async () => {
@@ -158,7 +159,7 @@ describe('running a validation', () => {
 
 		const result = await runDeployment(cli, 'validate', REQUEST);
 
-		expect(isErr(result) && result.error.code).toBe(ErrorCode.salesforceFailed);
+		expect(errorOf(result).code).toBe(ErrorCode.salesforceFailed);
 	});
 
 	test('a CLI that answers with something other than JSON is a failure', async () => {
@@ -166,7 +167,7 @@ describe('running a validation', () => {
 
 		const result = await runDeployment(cli, 'validate', REQUEST);
 
-		expect(isErr(result) && result.error.code).toBe(ErrorCode.salesforceFailed);
+		expect(errorOf(result).code).toBe(ErrorCode.salesforceFailed);
 	});
 
 	test('a missing Salesforce executable returns a typed failure instead of rejecting', async () => {
@@ -176,8 +177,8 @@ describe('running a validation', () => {
 			REQUEST,
 		);
 
-		expect(isErr(result) && result.error.code).toBe(ErrorCode.salesforceFailed);
-		expect(isErr(result) && result.error.message).toContain('could not start');
+		expect(errorOf(result).code).toBe(ErrorCode.salesforceFailed);
+		expect(errorOf(result).message).toContain('could not start');
 	});
 
 	test('noise printed before the JSON does not lose the result', async () => {
@@ -193,8 +194,8 @@ describe('running a validation', () => {
 
 		const result = await runDeployment({ ...cli, timeoutMs: 150 }, 'validate', REQUEST);
 
-		expect(isErr(result) && result.error.code).toBe(ErrorCode.salesforceFailed);
-		expect(isErr(result) && result.error.message).toContain('timed out');
+		expect(errorOf(result).code).toBe(ErrorCode.salesforceFailed);
+		expect(errorOf(result).message).toContain('timed out');
 	});
 });
 
@@ -235,7 +236,7 @@ describe('resolving the target org', () => {
 
 		const result = await resolveOrg(cli, 'docket-qa');
 
-		expect(isErr(result) && result.error.code).toBe(ErrorCode.orgUnavailable);
+		expect(errorOf(result).code).toBe(ErrorCode.orgUnavailable);
 	});
 
 	test('an unknown alias is refused', async () => {
@@ -246,7 +247,7 @@ describe('resolving the target org', () => {
 
 		const result = await resolveOrg(cli, 'nope');
 
-		expect(isErr(result) && result.error.code).toBe(ErrorCode.orgUnavailable);
+		expect(errorOf(result).code).toBe(ErrorCode.orgUnavailable);
 	});
 
 	test('an org that is not the validated one is refused', () => {
@@ -260,6 +261,6 @@ describe('resolving the target org', () => {
 		expect(isOk(requireOrgId(resolved, '00D000000000002EAA'))).toBe(true);
 
 		const mismatch = requireOrgId(resolved, '00D000000000001EAA');
-		expect(isErr(mismatch) && mismatch.error.code).toBe(ErrorCode.orgMismatch);
+		expect(errorOf(mismatch).code).toBe(ErrorCode.orgMismatch);
 	});
 });

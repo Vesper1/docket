@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 
 import { ErrorCode } from '../../shared/result/docket-error.ts';
 import { err, isErr, isOk, ok } from '../../shared/result/result.ts';
+import { errorOf } from '../../shared/result/testing/expect-result.ts';
 import { readFileAtCommit } from './read-file.ts';
 import { createGitFixture } from './testing/git-fixture.ts';
 import type { GitFixture } from './testing/git-fixture.ts';
@@ -19,7 +20,7 @@ afterEach(async () => {
 	fixture = undefined;
 });
 
-async function repository(): Promise<GitFixture> {
+const repository = async (): Promise<GitFixture> => {
 	return createGitFixture({
 		base: {
 			[CONFIG]: 'version: 1\n',
@@ -31,7 +32,7 @@ async function repository(): Promise<GitFixture> {
 			'force-app/main/default/classes/Bar.cls': 'public class Bar {}',
 		},
 	});
-}
+};
 
 describe('reading a file at an exact commit', () => {
 	test('the base commit answers with its own version of the file', async () => {
@@ -67,7 +68,7 @@ describe('reading a file at an exact commit', () => {
 			path: 'nope.yml',
 		});
 
-		expect(isErr(missing) && missing.error.code).toBe(ErrorCode.gitFailed);
+		expect(errorOf(missing).code).toBe(ErrorCode.gitFailed);
 	});
 });
 
@@ -161,6 +162,6 @@ describe('an isolated workspace', () => {
 			ok('unreachable'),
 		);
 
-		expect(isErr(result) && result.error.code).toBe(ErrorCode.gitFailed);
+		expect(errorOf(result).code).toBe(ErrorCode.gitFailed);
 	});
 });

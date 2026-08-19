@@ -31,10 +31,10 @@ export const DEFAULT_SOURCE_ROOT = 'force-app';
  * Both halves of an Apex class — the body and its `-meta.xml` — map to the same
  * component, so a change to either one deploys the class exactly once.
  */
-export function classifyPath(
+export const classifyPath = (
 	path: string,
 	options: ClassifyOptions = { sourceRoot: DEFAULT_SOURCE_ROOT },
-): Result<PathClassification, DocketError> {
+): Result<PathClassification, DocketError> => {
 	const root = trimSlashes(options.sourceRoot);
 	if (root !== '' && !path.startsWith(`${root}/`)) return ok({ kind: 'ignored' });
 
@@ -62,25 +62,23 @@ export function classifyPath(
 	}
 
 	return ok({ kind: 'component', component: { type: MetadataType.apexClass, member } });
-}
+};
 
 /** Apex class names are Java-like identifiers; anything else never compiled. */
 const APEX_IDENTIFIER = /^[A-Za-z][A-Za-z0-9_]*$/;
 
 const APEX_SUFFIXES = ['.cls-meta.xml', '.cls'] as const;
 
-function apexClassMember(fileName: string): string | undefined {
+const apexClassMember = (fileName: string): string | undefined => {
 	for (const suffix of APEX_SUFFIXES) {
 		if (fileName.endsWith(suffix)) return fileName.slice(0, -suffix.length);
 	}
 
 	return undefined;
-}
+};
 
-function trimSlashes(value: string): string {
-	return value.replace(/^\/+|\/+$/g, '');
-}
+const trimSlashes = (value: string): string => value.replace(/^\/+|\/+$/g, '');
 
-function unsupported(path: string, reason: string): DocketError {
+const unsupported = (path: string, reason: string): DocketError => {
 	return docketError(ErrorCode.unsupportedMetadata, `cannot map \`${path}\`: ${reason}`);
-}
+};

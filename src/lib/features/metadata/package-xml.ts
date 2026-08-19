@@ -19,10 +19,10 @@ const INDENT = '    ';
  * component list always produces the same bytes, which is what lets M4.5
  * compare artifacts across two machines.
  */
-export function renderPackageXml(
+export const renderPackageXml = (
 	components: readonly MetadataComponent[],
 	apiVersion: string = DEFAULT_API_VERSION,
-): string {
+): string => {
 	const lines = ['<?xml version="1.0" encoding="UTF-8"?>', PACKAGE_OPEN];
 
 	for (const [type, members] of groupByType(components)) {
@@ -34,12 +34,12 @@ export function renderPackageXml(
 	lines.push(`${INDENT}<version>${escape(apiVersion)}</version>`, '</Package>', '');
 
 	return lines.join('\n');
-}
+};
 
 const PACKAGE_OPEN = '<Package xmlns="http://soap.sforce.com/2006/04/metadata">';
 
 /** Types in sorted order, each with its members in sorted order. */
-function groupByType(components: readonly MetadataComponent[]): Map<MetadataType, string[]> {
+const groupByType = (components: readonly MetadataComponent[]): Map<MetadataType, string[]> => {
 	const grouped = new Map<MetadataType, string[]>();
 
 	for (const component of [...components].sort(compareComponents)) {
@@ -49,16 +49,16 @@ function groupByType(components: readonly MetadataComponent[]): Map<MetadataType
 	}
 
 	return grouped;
-}
+};
 
 /**
  * A member name reaches this function from a repository path, so it is not
  * trusted to be XML-safe even though a valid Apex identifier always is.
  */
-function escape(value: string): string {
+const escape = (value: string): string => {
 	return value
 		.replaceAll('&', '&amp;')
 		.replaceAll('<', '&lt;')
 		.replaceAll('>', '&gt;')
 		.replaceAll('"', '&quot;');
-}
+};

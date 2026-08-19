@@ -20,9 +20,9 @@
     "erasableSyntaxOnly": true,
 
     // Node 24 runs .ts directly and does not rewrite specifiers, so imports
-    // carry the real .ts extension; tsc rewrites them to .js if we ever emit.
+    // carry the real .ts extension. Nothing here emits: the runtime is Node
+    // for source and esbuild for the vendored bundle, and tsc only typechecks.
     "allowImportingTsExtensions": true,
-    "rewriteRelativeImportExtensions": true,
 
     "skipLibCheck": true,
     "noEmit": true

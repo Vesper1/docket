@@ -25,9 +25,9 @@ export const MetadataType = {
 export type MetadataType = (typeof MetadataType)[keyof typeof MetadataType];
 
 /** Identity of a component, for de-duplication across the files that define it. */
-export function componentKey(component: MetadataComponent): string {
+export const componentKey = (component: MetadataComponent): string => {
 	return `${component.type}:${component.member}`;
-}
+};
 
 /**
  * Total order over components: by type, then by member, both by code unit.
@@ -36,8 +36,8 @@ export function componentKey(component: MetadataComponent): string {
  * locale and ICU build, and a manifest that reorders itself between a laptop
  * and a runner would break the byte-identical artifacts M4.5 requires.
  */
-export function compareComponents(a: MetadataComponent, b: MetadataComponent): number {
+export const compareComponents = (a: MetadataComponent, b: MetadataComponent): number => {
 	if (a.type !== b.type) return a.type < b.type ? -1 : 1;
 	if (a.member === b.member) return 0;
 	return a.member < b.member ? -1 : 1;
-}
+};

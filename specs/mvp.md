@@ -1,8 +1,15 @@
 # Docket MVP — code-first deployment prototype
 
-Status: M0–M12 code paths are implemented; completed checklist gates are
-fixture-verified. Live GitHub Actions and Salesforce acceptance remains pending
-where marked.
+Status: **this is the direction, not the current engine.** On 2026-08-19 Docket
+was cut back to a POC — four dispatched commands over one pair of exact commits.
+What exists today is [`poc.md`](./poc.md).
+
+The M0–M12 code that implemented the flow below was written before any of it had
+run against a live org or a live GitHub Actions job. It is parked in
+[`legacy/`](../legacy/README.md) rather than deleted, and that file lists each
+piece with the condition under which it becomes worth pulling back. The
+checklist in §7 records what was built and how far it was verified; read it as
+history, not as the state of `src/`.
 
 The [original handwritten notes](./source-notes.md) are preserved separately.
 Deferred ideas live in [`improvements/`](./improvements/) and do not change this
@@ -91,14 +98,24 @@ from the PR head. A gate also runs without the runner's own tokens: the
 `ACTIONS_*` variables mint OIDC identities and write artifacts, so they are
 stripped alongside the Salesforce ones.
 
-This guarantee stops at the workflow file. GitHub runs a `pull_request` workflow
-from the pull request's own merge ref, so an unmerged change can rewrite the
-steps that invoke Docket — including the step holding the Salesforce
-credential — and no engine-side rule can prevent that. The credential is
-therefore protected by the GitHub Environment it belongs to: the `qa`
-environment must carry required reviewers, so a candidate commit cannot reach it
-without a person approving that run. Naming an environment on a job is not by
-itself a gate.
+This guarantee stops at the workflow file, and no engine-side rule can extend
+it: GitHub runs a `pull_request` workflow from the pull request's own merge ref,
+so an unmerged change can rewrite the steps that invoke Docket — including the
+step holding the Salesforce credential. Validation must nonetheless start on its
+own as soon as a pull request opens; a human approval standing in front of every
+run is a gate on the wrong thing. The human gate belongs on the merge, where
+branch protection's required approvals hold it — see Phase D.
+
+The workflow file itself is therefore made trusted rather than approved.
+`docket-validate.yml` runs on `pull_request_target`, which takes the workflow
+file from the base branch, so a candidate commit cannot rewrite the step that
+holds the credential and no approval is needed to protect it. The `qa`
+environment carries no required reviewers, and naming it on a job gates nothing
+— it only says where the secret lives. `pull_request_target` exposes secrets to
+fork pull requests as well, so refusing forks is part of the credential
+boundary: the un-credentialed `gates` job declines them, and the credentialed
+job runs only through `needs: gates`. Deployment needs none of this, running on
+a pull request that is already merged.
 
 The engine itself is vendored: one bundled file committed to the Salesforce
 repository at `.docket/docket.mjs`, with no registry, install step or token
@@ -201,7 +218,10 @@ The M12 fixture audit records three code-MVP limits rather than hiding them:
 ### Phase D — Merge and deploy
 
 1. GitHub enables Merge only while the required validation check is green for
-   the current PR head.
+   the current PR head and branch protection's required approvals are in.
+   Validation runs unattended, so the human sign-off before anything reaches
+   the org is this one — a review of the change, holding the merge rather than
+   holding the run.
 2. The user presses the native GitHub Merge button.
 3. The merged-PR event automatically starts the deployment workflow.
 4. The workflow retrieves the originating validated plan and manifests.

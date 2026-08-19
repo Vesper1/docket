@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'vitest';
 
 import { ErrorCode } from '../../shared/result/docket-error.ts';
-import { isErr, ok } from '../../shared/result/result.ts';
+import {ok} from '../../shared/result/result.ts';
+import { errorOf } from '../../shared/result/testing/expect-result.ts';
 import type { FileChange } from '../git/file-change.ts';
 import { classifyPath } from './classify-path.ts';
 import { collectComponents } from './component-set.ts';
@@ -41,20 +42,20 @@ describe('mapping a repository path to a component', () => {
 	test('an unimplemented metadata type inside the source directory is refused', () => {
 		const result = classifyPath('force-app/main/default/objects/Account/Account.object-meta.xml');
 
-		expect(isErr(result) && result.error.code).toBe(ErrorCode.unsupportedMetadata);
+		expect(errorOf(result).code).toBe(ErrorCode.unsupportedMetadata);
 	});
 
 	test('an Apex class outside a classes directory is refused', () => {
 		const result = classifyPath('force-app/main/default/Foo.cls');
 
-		expect(isErr(result) && result.error.code).toBe(ErrorCode.unsupportedMetadata);
+		expect(errorOf(result).code).toBe(ErrorCode.unsupportedMetadata);
 	});
 
 	test('a name Apex could never have compiled is refused', () => {
 		for (const fileName of ['1Foo.cls', 'Foo-Bar.cls', '.cls']) {
 			const result = classifyPath(`${CLASSES}/${fileName}`);
 
-			expect(isErr(result) && result.error.code).toBe(ErrorCode.unsupportedMetadata);
+			expect(errorOf(result).code).toBe(ErrorCode.unsupportedMetadata);
 		}
 	});
 });
@@ -141,7 +142,7 @@ describe('collecting the components of a change set', () => {
 			{ status: 'added', path: 'force-app/main/default/triggers/AccountTrigger.trigger' },
 		]);
 
-		expect(isErr(result) && result.error.code).toBe(ErrorCode.unsupportedMetadata);
+		expect(errorOf(result).code).toBe(ErrorCode.unsupportedMetadata);
 	});
 
 	test('mixed members come out in a deterministic order', () => {

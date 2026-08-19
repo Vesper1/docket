@@ -1,92 +1,79 @@
-# Docket — create a compensating pull request from one successful deployment.
+# Docket — deploy the inverse of a change, restoring the base commit.
 #
-# The workflow only creates Git objects and a PR. Salesforce credentials are
-# deliberately absent: validation, manual merge, and deployment happen through
-# the ordinary Docket validate/deploy workflows.
-name: Docket rollback PR
+# Same two commits as the deployment being undone: the engine inverts the
+# component set and deploys the base commit's tree. What was added is deleted,
+# what was deleted or modified is restored to the bytes the deployment started
+# from.
+#
+# This does not touch Git. The repository still holds the change; only the org
+# is put back. Reverting the code is a separate, ordinary pull request.
+name: Docket rollback
 
 on:
   workflow_dispatch:
     inputs:
-      source_run_id:
-        description: Workflow run ID that holds the successful deployment artifact
-        required: true
-        type: number
-      artifact_name:
-        description: Exact docket-deployment-* artifact name from that run
+      base:
+        description: Full SHA of the base commit of the deployment being undone
         required: true
         type: string
+      head:
+        description: Full SHA of its head commit
+        required: true
+        type: string
+      check_only:
+        description: Ask Salesforce to check the rollback without changing the org
+        required: false
+        default: false
+        type: boolean
 
 permissions:
-  contents: write
-  pull-requests: write
-  actions: read
+  contents: read
 
-env:
-  # The vendored engine, committed to this repository. It is read from a
-  # trusted commit rather than installed, so no registry or token is
-  # involved. `DOCKET` itself is set by the step that materializes it.
-  DOCKET_ENGINE: .docket/docket.mjs
+# Shares the deployment's group: a rollback and a deployment must never reach
+# the same org at once.
+concurrency:
+  group: docket-deploy
+  cancel-in-progress: false
 
 jobs:
-  propose:
+  rollback:
     runs-on: ubuntu-latest
+    environment: qa
     steps:
-      - name: Check out the repository history
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '24'
 
-      # The engine is executable configuration, so it is read from a
-      # commit that was already reviewed — never from the candidate's
-      # checkout, which sits in this same workspace. This is the rule
-      # `docket.yml` already follows.
-      - name: Materialize the trusted Docket engine
+      - name: Install the Salesforce CLI
+        run: npm install --global @salesforce/cli
+
+      - name: Authenticate to the org
         env:
-          DOCKET_ENGINE_REF: ${{ github.sha }}
+          SF_AUTH_URL: ${{ secrets.DOCKET_SF_AUTH_URL }}
         run: |
           set -euo pipefail
-          if ! git cat-file -e "$DOCKET_ENGINE_REF:$DOCKET_ENGINE" 2>/dev/null; then
-            echo "Commit $DOCKET_ENGINE_REF does not contain $DOCKET_ENGINE. Vendor the engine bundle into the repository first." >&2
-            exit 1
-          fi
-          git show "$DOCKET_ENGINE_REF:$DOCKET_ENGINE" > "$RUNNER_TEMP/docket.mjs"
-          # Printed so a run can be tied to one exact engine build.
-          sha256sum "$RUNNER_TEMP/docket.mjs"
-          echo "DOCKET=node $RUNNER_TEMP/docket.mjs" >> "$GITHUB_ENV"
+          printf '%s' "$SF_AUTH_URL" > "$RUNNER_TEMP/auth.txt"
+          sf org login sfdx-url --sfdx-url-file "$RUNNER_TEMP/auth.txt" --alias docket-qa
+          rm -f "$RUNNER_TEMP/auth.txt"
 
-      - name: Retrieve the exact recorded deployment
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ inputs.artifact_name }}
-          path: ${{ runner.temp }}/docket-source
-          run-id: ${{ inputs.source_run_id }}
-          github-token: ${{ github.token }}
-
-      - name: Build one inverse commit and open its pull request
-        env:
-          # A GitHub App installation token or fine-grained PAT makes the
-          # resulting pull_request workflow run automatically. The repository
-          # GITHUB_TOKEN fallback is safe, but GitHub may require a maintainer
-          # to approve the generated validation run.
-          GITHUB_TOKEN: ${{ secrets.DOCKET_PR_TOKEN || github.token }}
+      - name: Roll back
         run: |
-          $DOCKET rollback \
-            --repo "$GITHUB_WORKSPACE" \
-            --repository "$GITHUB_REPOSITORY" \
-            --run "$RUNNER_TEMP/docket-source" \
-            --create-pr \
-            --out "$RUNNER_TEMP/docket-rollback"
+          set -euo pipefail
+          node .docket/docket.mjs rollback \
+            --base "${{ inputs.base }}" \
+            --head "${{ inputs.head }}" \
+            --out "$RUNNER_TEMP/docket-run" \
+            ${{ inputs.check_only && '--check-only' || '' }}
 
-      - name: Upload the reviewable rollback calculation
+      - name: Upload the run artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
-          name: docket-rollback-${{ github.run_id }}
-          path: ${{ runner.temp }}/docket-rollback
+          name: docket-rollback-${{ inputs.head }}
+          path: ${{ runner.temp }}/docket-run
           if-no-files-found: warn

@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
 
 import { ErrorCode } from '../../shared/result/docket-error.ts';
-import { isErr, ok } from '../../shared/result/result.ts';
+import {ok} from '../../shared/result/result.ts';
+import { errorOf } from '../../shared/result/testing/expect-result.ts';
 import { runGit } from './git-command.ts';
 import { readChanges } from './read-changes.ts';
 import { createGitFixture } from './testing/git-fixture.ts';
@@ -24,22 +25,22 @@ afterEach(async () => {
 });
 
 /** Builds the fixture and asks for the changes between its two commits. */
-async function changesOf(input: GitFixtureInput) {
+const changesOf = async (input: GitFixtureInput) => {
 	fixture = await createGitFixture(input);
 	return readChanges({
 		cwd: fixture.directory,
 		baseSha: fixture.baseSha,
 		headSha: fixture.headSha,
 	});
-}
+};
 
 /** One class survives untouched, one class appears in the head commit. */
-function addedClass(): Promise<GitFixture> {
+const addedClass = (): Promise<GitFixture> => {
 	return createGitFixture({
 		base: { [KEPT]: 'public class Foo {}' },
 		head: { [KEPT]: 'public class Foo {}', [SUBJECT]: 'public class Bar {}' },
 	});
-}
+};
 
 describe('reading the changes between two exact commits', () => {
 	test('a path only the head commit has is added', async () => {
@@ -149,7 +150,7 @@ describe('a change Docket cannot answer for is refused', () => {
 				headSha: repository.headSha,
 			});
 
-			expect(isErr(result) && result.error.code).toBe(ErrorCode.unsupportedChange);
+			expect(errorOf(result).code).toBe(ErrorCode.unsupportedChange);
 		} finally {
 			await rm(repository.directory, { recursive: true, force: true });
 		}
@@ -164,7 +165,7 @@ describe('a change Docket cannot answer for is refused', () => {
 			headSha: '0'.repeat(40),
 		});
 
-		expect(isErr(result) && result.error.code).toBe(ErrorCode.gitFailed);
+		expect(errorOf(result).code).toBe(ErrorCode.gitFailed);
 	});
 });
 
@@ -173,11 +174,11 @@ describe('a change Docket cannot answer for is refused', () => {
  * Salesforce metadata mapping can honour, so it is the cheapest real example
  * of a change Docket must refuse rather than guess at.
  */
-async function typeChangeRepository(): Promise<{
+const typeChangeRepository = async (): Promise<{
 	readonly directory: string;
 	readonly baseSha: string;
 	readonly headSha: string;
-}> {
+}> => {
 	const directory = await mkdtemp(join(tmpdir(), 'docket-typechange-'));
 	const identity = {
 		GIT_AUTHOR_NAME: 'Docket Fixture',
