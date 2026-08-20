@@ -1,0 +1,22 @@
+name: Format
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prettier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+
+      # No package.json in the repository yet, so the version is pinned here
+      # rather than in a lockfile. Same command formats locally: `--write .`
+      - run: npx --yes prettier@3.9.6 --check .
