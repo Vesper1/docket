@@ -147,3 +147,32 @@ export const failedDeployment = (): string => {
 		},
 	});
 };
+
+/** A full Apex test run, shaped like `sf apex run test --json`. */
+export const apexTestRun = (overrides: {
+	readonly summary?: Record<string, unknown>;
+	readonly tests?: readonly unknown[];
+	readonly codecoverage?: readonly unknown[];
+} = {}): string => {
+	return JSON.stringify({
+		status: 0,
+		result: {
+			summary: {
+				testRunId: '707000000000001AAA',
+				outcome: 'Passed',
+				testsRan: 2,
+				passing: 2,
+				failing: 0,
+				skipped: 0,
+				orgWideCoverage: '84%',
+				...overrides.summary,
+			},
+			tests: overrides.tests ?? [
+				{ ApexClass: { Name: 'GreeterTest' }, MethodName: 'greets', Outcome: 'Pass' },
+			],
+			codecoverage: overrides.codecoverage ?? [
+				{ name: 'Greeter', totalLines: 10, totalCovered: 9 },
+			],
+		},
+	});
+};

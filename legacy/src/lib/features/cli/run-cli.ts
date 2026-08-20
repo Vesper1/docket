@@ -12,6 +12,8 @@ import type { FileChange } from '../git/file-change.ts';
 import { ARTIFACT_NAMES, preparePlan, runPipeline } from '../pipeline/run-pipeline.ts';
 import type { RunOutcome } from '../pipeline/run-pipeline.ts';
 import { renderReport } from '../plan/plan.ts';
+import { runTestRun } from '../testrun/run-test-run.ts';
+import type { TestRunOutcome } from '../testrun/run-test-run.ts';
 import type { DeploymentPlan } from '../plan/plan.ts';
 import { mkdir, writeFile } from 'node:fs/promises';
 
@@ -37,10 +39,12 @@ const OPTIONS = {
 	repo: { type: 'string', description: 'Repository to read (default: current directory)' },
 	base: { type: 'string', description: 'Full SHA of the base commit' },
 	head: { type: 'string', description: 'Full SHA of the head commit' },
+	sha: { type: 'string', description: 'Full SHA of the commit naming the org' },
 	out: { type: 'string', description: 'Directory for run artifacts' },
 	sf: { type: 'string', description: 'Salesforce CLI executable (default: sf)' },
 	wait: { type: 'string', description: 'Minutes to wait for Salesforce (default: 33)' },
 	'check-only': { type: 'boolean', description: 'Ask Salesforce to check without changing the org' },
+	'min-coverage': { type: 'string', description: 'Lowest per-class coverage a test run accepts' },
 	json: { type: 'boolean', description: 'Emit machine-readable output on stdout' },
 	help: { type: 'boolean', short: 'h', description: 'Show this help' },
 	version: { type: 'boolean', short: 'v', description: 'Show the version' },
@@ -51,6 +55,7 @@ const COMMANDS = {
 	plan: 'Write the manifests a deployment would use',
 	deploy: 'Deploy the change between two commits to the configured org',
 	rollback: 'Deploy the inverse of that change, restoring the base commit',
+	test: 'Run every local Apex test in the configured org and report coverage',
 } as const;
 
 type CommandName = keyof typeof COMMANDS;
@@ -74,7 +79,8 @@ type CliData =
 	| { readonly kind: 'version'; readonly version: string }
 	| { readonly kind: 'changes'; readonly changes: readonly FileChange[] }
 	| { readonly kind: 'plan'; readonly plan: DeploymentPlan; readonly directory: string }
-	| { readonly kind: 'run'; readonly run: RunOutcome };
+	| { readonly kind: 'run'; readonly run: RunOutcome }
+	| { readonly kind: 'testRun'; readonly run: TestRunOutcome };
 
 const execute = async (
 	argv: readonly string[],
@@ -90,12 +96,36 @@ const execute = async (
 	// A bare invocation is not a mistake; it is someone looking for the help.
 	if (command === undefined) return ok({ kind: 'help', usage: helpText() });
 
+	const repositoryDirectory = values.repo ?? context.cwd;
+
+	// The test run takes one commit, not a pair: it deploys nothing, and the
+	// only thing it reads from the repository is which org to ask.
+	if (command === 'test') {
+		const sha = requiredSha(values.sha, '--sha');
+		if (!sha.ok) return sha;
+
+		const waitMinutes = waitMinutesOf(values.wait);
+		if (!waitMinutes.ok) return waitMinutes;
+
+		const minCoveragePercent = minCoverageOf(values['min-coverage']);
+		if (!minCoveragePercent.ok) return minCoveragePercent;
+
+		const run = await runTestRun({
+			repositoryDirectory,
+			sha: sha.value,
+			outputDirectory: outputDirectoryOf(values.out, context.cwd, command),
+			executable: values.sf ?? 'sf',
+			waitMinutes: waitMinutes.value,
+			minCoveragePercent: minCoveragePercent.value,
+		});
+
+		return run.ok ? ok({ kind: 'testRun', run: run.value }) : run;
+	}
+
 	const base = requiredSha(values.base, '--base');
 	if (!base.ok) return base;
 	const head = requiredSha(values.head, '--head');
 	if (!head.ok) return head;
-
-	const repositoryDirectory = values.repo ?? context.cwd;
 
 	if (command === 'changes') {
 		const changes = await readChanges({
@@ -209,6 +239,22 @@ const waitMinutesOf = (value: string | undefined): Result<number, DocketError> =
 	return ok(parsed);
 };
 
+/**
+ * An absent minimum is not zero: it means the run reports coverage without
+ * holding anything to a number, which is how a team sees where it stands
+ * before deciding what to enforce.
+ */
+const minCoverageOf = (value: string | undefined): Result<number | null, DocketError> => {
+	if (value === undefined) return ok(null);
+
+	const parsed = Number(value);
+	if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) {
+		return err(docketError(ErrorCode.invalidOption, '--min-coverage must be a percentage between 0 and 100'));
+	}
+
+	return ok(parsed);
+};
+
 const outputDirectoryOf = (out: string | undefined, cwd: string, command: string): string => {
 	const directory = out ?? join('.docket', command);
 	return isAbsolute(directory) ? directory : join(cwd, directory);
@@ -234,7 +280,7 @@ const writePlan = async (directory: string, plan: DeploymentPlan): Promise<Resul
  * its subject failed, and nothing downstream may read that as success.
  */
 const exitCodeOf = (data: CliData): 0 | 1 =>
-	data.kind === 'run' && data.run.status === 'failed' ? 1 : 0;
+	(data.kind === 'run' || data.kind === 'testRun') && data.run.status === 'failed' ? 1 : 0;
 
 const USAGE_EXIT_CODES = new Set<string>([
 	ErrorCode.unknownCommand,
@@ -290,6 +336,8 @@ const humanText = (data: CliData): string => {
 			return `${renderReport(data.plan)}artifacts  ${data.directory}\n`;
 		case 'run':
 			return runSummary(data.run);
+		case 'testRun':
+			return testRunSummary(data.run);
 	}
 };
 
@@ -317,6 +365,19 @@ const runSummary = (run: RunOutcome): string => {
 	];
 
 	if (run.deployment !== null) lines.push(`salesforce ${run.deployment.deploymentId}`);
+	for (const failure of run.failures) lines.push(`failed     ${failure}`);
+	lines.push(`artifacts  ${run.directory}`);
+
+	return `${lines.join('\n')}\n`;
+};
+
+/** The verdict, then every reason it is not a pass. */
+const testRunSummary = (run: TestRunOutcome): string => {
+	const lines = [
+		`test ${run.status}: ${run.tests.ran} tests in ${run.org.reference}`,
+		`salesforce ${run.tests.testRunId}`,
+	];
+
 	for (const failure of run.failures) lines.push(`failed     ${failure}`);
 	lines.push(`artifacts  ${run.directory}`);
 
