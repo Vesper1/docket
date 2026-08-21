@@ -1,7 +1,11 @@
+# PMD is no longer a pull request gate: the Code Analyzer workflow runs the same
+# curated Apex rules through the `docket-apex` tag in code-analyzer.yml. This
+# workflow stays dispatchable so the ruleset in .github/pmd/apex-ruleset.xml can
+# be run against upstream PMD directly.
 name: PMD
 
 on:
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,6 +18,8 @@ concurrency:
 jobs:
   detect_code_changes:
     uses: ./.github/workflows/detect-code-changes.yml
+    with:
+      base: ${{ github.event.repository.default_branch }}
 
   pmd:
     needs: detect_code_changes

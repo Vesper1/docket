@@ -1,0 +1,60 @@
+# Salesforce Code Analyzer configuration.
+#
+# Regenerate a fully commented template with every default:
+#   sf code-analyzer config --output-file code-analyzer.yml
+#
+# Rules are selected by tag, never by listing rule names on the command line.
+# `docket-apex` below is the curated PMD set the pull request gate runs; it
+# mirrors .github/pmd/apex-ruleset.xml, which the standalone PMD workflow keeps
+# using.
+
+ignores:
+  files:
+    - 'legacy/**'
+    - 'node_modules/**'
+    # Tool-managed content, not project source.
+    - '.agents/**'
+    - '.claude/**'
+
+rules:
+  pmd:
+    # Security: the only category where a miss reaches production data.
+    ApexSOQLInjection:
+      tags: ['Recommended', 'Security', 'Apex', 'docket-apex']
+    ApexOpenRedirect:
+      tags: ['Recommended', 'Security', 'Apex', 'docket-apex']
+    ApexInsecureEndpoint:
+      tags: ['Recommended', 'Security', 'Apex', 'docket-apex']
+    ApexXSSFromURLParam:
+      tags: ['Recommended', 'Security', 'Apex', 'docket-apex']
+    ApexSharingViolations:
+      tags: ['Recommended', 'Security', 'Apex', 'docket-apex']
+
+    # Error prone: hidden failures that pass a code review.
+    EmptyCatchBlock:
+      tags: ['Recommended', 'ErrorProne', 'Apex', 'docket-apex']
+    AvoidHardcodingId:
+      tags: ['Recommended', 'ErrorProne', 'Apex', 'docket-apex']
+    AvoidDirectAccessTriggerMap:
+      tags: ['Recommended', 'ErrorProne', 'Apex', 'docket-apex']
+    MethodWithSameNameAsEnclosingClass:
+      tags: ['Recommended', 'ErrorProne', 'Apex', 'docket-apex']
+
+    # Performance: governor limits are a runtime failure, not a style issue.
+    OperationWithLimitsInLoop:
+      tags: ['Recommended', 'Performance', 'Apex', 'docket-apex']
+
+    # Best practices: the two that change how the org can be deployed.
+    ApexUnitTestClassShouldHaveAsserts:
+      tags: ['Recommended', 'BestPractices', 'Apex', 'docket-apex']
+    AvoidGlobalModifier:
+      tags: ['Recommended', 'BestPractices', 'Apex', 'docket-apex']
+
+engines:
+  eslint:
+    eslint_config_file: eslint.config.mjs
+    # Code Analyzer otherwise layers `eslint:all` and `@typescript-eslint:all`
+    # on top of the project config, which turns every stylistic preference the
+    # project deliberately left off into a gate failure.
+    disable_javascript_base_config: true
+    disable_typescript_base_config: true

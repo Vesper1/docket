@@ -1,7 +1,11 @@
+# ESLint is no longer a pull request gate: the Code Analyzer workflow runs the
+# same rules from eslint.config.mjs alongside PMD, Flow, and Regex. This
+# workflow stays dispatchable so the engine can be run on its own when a
+# Code Analyzer result needs to be reproduced against plain ESLint.
 name: ESLint
 
 on:
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,6 +18,8 @@ concurrency:
 jobs:
   detect_code_changes:
     uses: ./.github/workflows/detect-code-changes.yml
+    with:
+      base: ${{ github.event.repository.default_branch }}
 
   eslint:
     needs: detect_code_changes

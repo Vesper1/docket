@@ -2,6 +2,12 @@ name: Detect code changes
 
 on:
   workflow_call:
+    inputs:
+      base:
+        description: Ref to compare against; leave empty to use the pull request base
+        type: string
+        required: false
+        default: ''
     outputs:
       has_code_changes:
         description: Whether the pull request adds or modifies code files
@@ -21,6 +27,12 @@ on:
       js_ts_files:
         description: JSON array of added or modified JavaScript or TypeScript files
         value: ${{ jobs.detect.outputs.js_ts_files }}
+      has_analyzable_changes:
+        description: Whether the pull request adds or modifies files Code Analyzer scans
+        value: ${{ jobs.detect.outputs.has_analyzable_changes }}
+      analyzable_files:
+        description: JSON array of added or modified files Code Analyzer scans
+        value: ${{ jobs.detect.outputs.analyzable_files }}
 
 permissions:
   contents: read
@@ -37,11 +49,14 @@ jobs:
       apex_files: ${{ steps.filter.outputs.apex_files }}
       has_js_ts_changes: ${{ steps.filter.outputs.js_ts }}
       js_ts_files: ${{ steps.filter.outputs.js_ts_files }}
+      has_analyzable_changes: ${{ steps.filter.outputs.analyzable }}
+      analyzable_files: ${{ steps.filter.outputs.analyzable_files }}
     steps:
       - name: Detect added or modified code files
         id: filter
         uses: dorny/paths-filter@v4.0.3
         with:
+          base: ${{ inputs.base }}
           list-files: json
           filters: |
             code:
@@ -50,3 +65,5 @@ jobs:
               - added|modified: '**/*.{cls,trigger}'
             js_ts:
               - added|modified: '**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}'
+            analyzable:
+              - added|modified: '**/*.{cls,trigger,js,jsx,mjs,cjs,ts,tsx,mts,cts,page,cmp,html,flow-meta.xml}'
