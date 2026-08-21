@@ -1,0 +1,92 @@
+# Docket — run every local Apex test in the org and report coverage.
+#
+# Copy into `.github/workflows/` of the Salesforce repository, beside
+# `.docket/docket.mjs` — the vendored engine bundle this job runs.
+#
+# This is not a gate. It deploys nothing, reads no diff and blocks no merge; it
+# answers one question no per-change check can answer — what is the state of
+# the org's test suite right now. A class whose tests someone deleted appears
+# in nobody's diff, so only a full run finds it.
+name: Docket test
+
+on:
+  schedule:
+    # Monday morning, deliberately off the hour: GitHub queues scheduled runs at
+    # low priority, and `0 * * * *` is where the whole world aims. Times are UTC
+    # and never shift for daylight saving.
+    - cron: '17 6 * * 1'
+  # Always dispatchable. A scheduled workflow that has never been run by hand
+  # is a workflow nobody has tested.
+  workflow_dispatch:
+    inputs:
+      min_coverage:
+        description: Lowest per-class coverage the run accepts (blank reports without failing)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+# The org runs one suite at a time. A second run would queue behind the first
+# in Salesforce anyway, and would report numbers taken mid-run.
+concurrency:
+  group: docket-test
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # Names where DOCKET_SF_AUTH_URL lives.
+    environment: qa
+    # RunLocalTests over a real org is measured in tens of minutes. The default
+    # job limit is 6 hours; this bound is here so a stuck run fails visibly
+    # rather than burning the whole window.
+    timeout-minutes: 180
+    steps:
+      # A scheduled run always checks out the default branch, and its
+      # `docket.yml` is the file this job trusts to name the org.
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      - name: Install the Salesforce CLI
+        run: npm install --global @salesforce/cli
+
+      - name: Authenticate to the org
+        env:
+          SF_AUTH_URL: ${{ secrets.DOCKET_SF_AUTH_URL }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$SF_AUTH_URL" > "$RUNNER_TEMP/auth.txt"
+          sf org login sfdx-url --sfdx-url-file "$RUNNER_TEMP/auth.txt" --alias docket-qa
+          rm -f "$RUNNER_TEMP/auth.txt"
+
+      - name: Run every local test
+        id: run
+        run: |
+          set -euo pipefail
+          node .docket/docket.mjs test \
+            --sha "$GITHUB_SHA" \
+            --out "$RUNNER_TEMP/docket-test" \
+            --wait 150 \
+            ${MIN_COVERAGE:+--min-coverage "$MIN_COVERAGE"}
+        env:
+          MIN_COVERAGE: ${{ inputs.min_coverage }}
+
+      # The numbers belong on the job page. A weekly report nobody opens is a
+      # weekly report that changes nothing.
+      - name: Publish the summary
+        if: always()
+        run: cat "$RUNNER_TEMP/docket-test/report.md" >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload the run artifacts
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: docket-test-${{ github.run_id }}
+          path: ${{ runner.temp }}/docket-test
+          if-no-files-found: warn

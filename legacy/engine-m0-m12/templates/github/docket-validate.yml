@@ -1,0 +1,256 @@
+# Docket — validate a pull request against the QA org.
+#
+# Copy into `.github/workflows/` of the Salesforce repository. The check this
+# publishes (`docket/validate`) is what branch protection must require: it is
+# the only thing that can gate the native Merge button.
+#
+# One thing must be configured before this workflow is safe to enable:
+# `.docket/docket.mjs`, the vendored engine bundle committed to this
+# repository, together with `.github/actions/docket-engine/action.yml`. Every
+# job reads the engine out of the pull request's *base* commit, never out of
+# the candidate checkout, so a pull request cannot swap the engine that runs
+# beside the credential. See `templates/github/README.md`.
+#
+# Validation must start on its own the moment a pull request opens, so nothing
+# here waits for a person. That is why the trigger is `pull_request_target`: it
+# runs the workflow file from the *base* branch, so an unmerged change cannot
+# rewrite the steps below — including the ones holding
+# `secrets.DOCKET_SF_AUTH_URL`. Under a plain `pull_request` event the workflow
+# file comes from the pull request itself, and only required reviewers on the
+# `qa` environment could stand between a candidate commit and the credential.
+# The trigger takes over that job, so `qa` carries no reviewers and no run
+# stops to be approved. The human sign-off does not disappear, it moves to
+# where it belongs: branch protection's required approvals hold the merge, so
+# a person still reviews the change before it can reach the org.
+#
+# Two consequences of `pull_request_target` are load-bearing below.
+#
+# 1. Secrets are offered to pull requests from forks as well, so the `if:` that
+#    refuses forks is a security control here, not a courtesy.
+# 2. The candidate is the thing under test, so every job checks out `head.sha`
+#    explicitly — but into `candidate/`, beside a workspace root that holds the
+#    trusted base commit. The engine and the local action that materializes it
+#    are both read from that root, so a candidate commit can rewrite neither.
+#    Candidate-controlled commands stay in `gates`, which holds no credential.
+name: Docket validate
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+# One validation per pull request. A new push makes the previous answer
+# obsolete, so cancelling it is correct here — unlike a deployment.
+concurrency:
+  group: docket-validate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  # The vendored engine, committed to this repository. It is read from a
+  # trusted commit rather than installed, so no registry or token is
+  # involved. `DOCKET` itself is set by the step that materializes it.
+  DOCKET_ENGINE: .docket/docket.mjs
+  DOCKET_ENVIRONMENT: qa
+
+jobs:
+  gates:
+    permissions:
+      contents: read
+    # Forks and drafts are refused by the engine too, but this condition is
+    # what keeps a fork's pull request from ever reaching a job that holds
+    # credentials — `pull_request_target` would otherwise offer the secret to
+    # one. `validate` runs only through `needs: gates`, so refusing here
+    # refuses both. Do not relax it.
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the trusted base commit that carries the engine
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      # A local action is loaded from the workspace, so the checkout above has
+      # to be the trusted commit itself. A candidate checkout belongs in a
+      # sibling directory, never at the workspace root.
+      - name: Materialize the trusted Docket engine
+        uses: ./.github/actions/docket-engine
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          engine: ${{ env.DOCKET_ENGINE }}
+
+      - name: Check out the exact head commit beside it
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          # Beside the trusted checkout, never over it: the workspace root is
+          # what the local action above is read from.
+          path: candidate
+          fetch-depth: 0
+          # Candidate commands must not inherit checkout's repository token.
+          persist-credentials: false
+
+      - name: Run candidate gates without deployment credentials
+        run: |
+          $DOCKET gates \
+            --repo "$GITHUB_WORKSPACE/candidate" \
+            --repository "$GITHUB_REPOSITORY" \
+            --pull-request "${{ github.event.pull_request.number }}" \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --head "${{ github.event.pull_request.head.sha }}" \
+            --target-branch "${{ github.event.pull_request.base.ref }}" \
+            --environment "$DOCKET_ENVIRONMENT" \
+            --out "$RUNNER_TEMP/docket-gates"
+
+      - name: Upload the gate evidence
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: docket-gates-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/docket-gates
+          if-no-files-found: error
+
+  validate:
+    needs: gates
+    permissions:
+      contents: read
+      actions: read
+      checks: write
+    runs-on: ubuntu-latest
+    # Names where `DOCKET_SF_AUTH_URL` lives; it gates nothing by itself, and
+    # deliberately so — the run must not stop for an approval. The credential
+    # enters only after the candidate gate job ended.
+    environment: qa
+    steps:
+      - name: Check out the trusted base commit that carries the engine
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      # A local action is loaded from the workspace, so the checkout above has
+      # to be the trusted commit itself. A candidate checkout belongs in a
+      # sibling directory, never at the workspace root.
+      - name: Materialize the trusted Docket engine
+        uses: ./.github/actions/docket-engine
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          engine: ${{ env.DOCKET_ENGINE }}
+
+      - name: Check out the exact head commit beside it
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          # Beside the trusted checkout, never over it: the workspace root is
+          # what the local action above is read from.
+          path: candidate
+          fetch-depth: 0
+          # Candidate commands must not inherit checkout's repository token.
+          persist-credentials: false
+
+      - name: Retrieve the passing gate evidence
+        uses: actions/download-artifact@v5
+        with:
+          name: docket-gates-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/docket-gates
+
+      - name: Install the Salesforce CLI
+        run: npm install --global @salesforce/cli
+
+      - name: Authenticate to the QA org
+        env:
+          SF_AUTH_URL: ${{ secrets.DOCKET_SF_AUTH_URL }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$SF_AUTH_URL" > "$RUNNER_TEMP/auth.txt"
+          sf org login sfdx-url --sfdx-url-file "$RUNNER_TEMP/auth.txt" --alias docket-qa
+          rm -f "$RUNNER_TEMP/auth.txt"
+
+      # The verdict is data, not a step failure: the artifacts and the check
+      # must be published whichever way it went.
+      - name: Validate
+        id: validate
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # §4: the run states its own retention window rather than leaving a
+          # later audit to assume the evidence is permanent.
+          expires_at=$(date -u -d "+${GITHUB_RETENTION_DAYS:-90} days" +%Y-%m-%dT%H:%M:%S.000Z)
+          $DOCKET validate \
+            --repo "$GITHUB_WORKSPACE/candidate" \
+            --repository "$GITHUB_REPOSITORY" \
+            --pull-request "${{ github.event.pull_request.number }}" \
+            --environment "$DOCKET_ENVIRONMENT" \
+            --gates-run "$RUNNER_TEMP/docket-gates" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --artifacts-expire-at "$expires_at" \
+            --out "$RUNNER_TEMP/docket-run"
+
+      # A run that died before it recorded anything has no verdict to publish
+      # and no artifacts to upload. Both steps below ask this one what happened
+      # rather than assuming the record exists.
+      - name: Note whether the run recorded itself
+        id: record
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ -f "$RUNNER_TEMP/docket-run/run.json" ]; then
+            echo "recorded=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "recorded=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload the validated plan
+        if: steps.record.outputs.recorded == 'true'
+        uses: actions/upload-artifact@v5
+        with:
+          # The exact PR and head SHA, so a deployment can only ever pick up
+          # the artifacts of the change it is deploying.
+          name: docket-validation-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/docket-run
+          if-no-files-found: error
+
+      # Whatever happened, the pull request must show it. Without a check the
+      # merge is blocked with no visible reason, and the answer lives only in
+      # this log.
+      - name: Publish the required check
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.record.outputs.recorded }}" = "true" ]; then
+            $DOCKET publish-check \
+              --repository "$GITHUB_REPOSITORY" \
+              --validated-run "$RUNNER_TEMP/docket-run" \
+              --workflow-run-id "$GITHUB_RUN_ID" \
+              --details-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          else
+            # `--failed` can only ever publish a failure, and the check it
+            # publishes carries no plan identity, so no deployment can select it.
+            $DOCKET publish-check \
+              --repository "$GITHUB_REPOSITORY" \
+              --head "${{ github.event.pull_request.head.sha }}" \
+              --workflow-run-id "$GITHUB_RUN_ID" \
+              --failed "the run recorded no verdict; see the workflow log" \
+              --details-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          fi
+
+      - name: Fail the job when validation failed
+        if: always() && steps.validate.outcome != 'success'
+        run: exit 1

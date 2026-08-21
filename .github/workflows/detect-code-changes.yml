@@ -1,0 +1,52 @@
+name: Detect code changes
+
+on:
+  workflow_call:
+    outputs:
+      has_code_changes:
+        description: Whether the pull request adds or modifies code files
+        value: ${{ jobs.detect.outputs.has_code_changes }}
+      code_files:
+        description: JSON array of added or modified code files
+        value: ${{ jobs.detect.outputs.code_files }}
+      has_apex_changes:
+        description: Whether the pull request adds or modifies Apex files
+        value: ${{ jobs.detect.outputs.has_apex_changes }}
+      apex_files:
+        description: JSON array of added or modified Apex files
+        value: ${{ jobs.detect.outputs.apex_files }}
+      has_js_ts_changes:
+        description: Whether the pull request adds or modifies JavaScript or TypeScript files
+        value: ${{ jobs.detect.outputs.has_js_ts_changes }}
+      js_ts_files:
+        description: JSON array of added or modified JavaScript or TypeScript files
+        value: ${{ jobs.detect.outputs.js_ts_files }}
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      has_code_changes: ${{ steps.filter.outputs.code }}
+      code_files: ${{ steps.filter.outputs.code_files }}
+      has_apex_changes: ${{ steps.filter.outputs.apex }}
+      apex_files: ${{ steps.filter.outputs.apex_files }}
+      has_js_ts_changes: ${{ steps.filter.outputs.js_ts }}
+      js_ts_files: ${{ steps.filter.outputs.js_ts_files }}
+    steps:
+      - name: Detect added or modified code files
+        id: filter
+        uses: dorny/paths-filter@v4.0.3
+        with:
+          list-files: json
+          filters: |
+            code:
+              - added|modified: '**/*.{cls,trigger,js,jsx,mjs,cjs,ts,tsx,mts,cts}'
+            apex:
+              - added|modified: '**/*.{cls,trigger}'
+            js_ts:
+              - added|modified: '**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}'

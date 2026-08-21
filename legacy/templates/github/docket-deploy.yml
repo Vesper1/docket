@@ -1,0 +1,84 @@
+# Docket — deploy the change between two exact commits to the configured org.
+#
+# Copy into `.github/workflows/` of the Salesforce repository, beside
+# `.docket/docket.mjs` — the vendored engine bundle this job runs.
+#
+# The POC is dispatched by a person, not by a pull request event: whoever runs
+# it already needs repository write access, so nothing here has to establish
+# trust in the commit. Configuration and gate commands are still read from the
+# base commit rather than the working tree, because a candidate change must not
+# be able to rewrite what runs beside the Salesforce credential.
+name: Docket deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Full SHA of the base commit
+        required: true
+        type: string
+      head:
+        description: Full SHA of the head commit
+        required: true
+        type: string
+      check_only:
+        description: Ask Salesforce to check the deployment without changing the org
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+# One deployment to the org at a time. Unlike a validation, a running
+# deployment is never cancelled: Salesforce would be left mid-change.
+concurrency:
+  group: docket-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Names where DOCKET_SF_AUTH_URL lives.
+    environment: qa
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Both commits must exist locally: the engine diffs them directly.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      - name: Install the Salesforce CLI
+        run: npm install --global @salesforce/cli
+
+      - name: Authenticate to the org
+        env:
+          SF_AUTH_URL: ${{ secrets.DOCKET_SF_AUTH_URL }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$SF_AUTH_URL" > "$RUNNER_TEMP/auth.txt"
+          sf org login sfdx-url --sfdx-url-file "$RUNNER_TEMP/auth.txt" --alias docket-qa
+          rm -f "$RUNNER_TEMP/auth.txt"
+
+      - name: Deploy
+        run: |
+          set -euo pipefail
+          node .docket/docket.mjs deploy \
+            --base "${{ inputs.base }}" \
+            --head "${{ inputs.head }}" \
+            --out "$RUNNER_TEMP/docket-run" \
+            ${{ inputs.check_only && '--check-only' || '' }}
+
+      # Whatever happened, the evidence is kept: a failed deployment is the run
+      # someone needs to read.
+      - name: Upload the run artifacts
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: docket-deploy-${{ inputs.head }}
+          path: ${{ runner.temp }}/docket-run
+          if-no-files-found: warn

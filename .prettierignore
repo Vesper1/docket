@@ -1,0 +1,6 @@
+legacy/
+node_modules/
+
+# Tool-managed content, not project source.
+.agents/
+.claude/

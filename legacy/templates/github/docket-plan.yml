@@ -1,0 +1,53 @@
+# Docket — show what a deployment would do, without touching the org.
+#
+# No Salesforce credential is involved, so this is safe to run against any
+# commit pair by anyone with dispatch access. Use it to review a change before
+# dispatching `docket-deploy.yml` with the same two SHAs.
+name: Docket plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Full SHA of the base commit
+        required: true
+        type: string
+      head:
+        description: Full SHA of the head commit
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      - name: Build the plan
+        run: |
+          set -euo pipefail
+          node .docket/docket.mjs plan \
+            --base "${{ inputs.base }}" \
+            --head "${{ inputs.head }}" \
+            --out "$RUNNER_TEMP/docket-plan"
+          # The report is the whole point of this workflow, so it goes where a
+          # reader already is rather than into an artifact they have to download.
+          cat "$RUNNER_TEMP/docket-plan/report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the manifests
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: docket-plan-${{ inputs.head }}
+          path: ${{ runner.temp }}/docket-plan
+          if-no-files-found: warn

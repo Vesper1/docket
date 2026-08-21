@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review TypeScript"
+  short_description: "Audit TypeScript contracts and architecture"
+  default_prompt: "Use $review-typescript to audit this TypeScript code and return prioritized findings."

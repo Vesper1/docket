@@ -1,0 +1,46 @@
+# Docket — read the vendored engine out of a commit the candidate cannot write.
+#
+# Copy into `.github/actions/docket-engine/action.yml` of the Salesforce
+# repository, beside the workflows that use it.
+#
+# This file is itself executable configuration, and a local action is loaded
+# from the workspace. Every job below must therefore check out the *trusted*
+# commit first and run this action against that checkout; a candidate checkout
+# belongs in a sibling directory, never at the workspace root. The workflow
+# templates follow that order, and `workflows.test.ts` holds them to it.
+name: Materialize the trusted Docket engine
+description: >-
+  Reads the vendored Docket engine bundle out of one named commit and exports
+  DOCKET, the command every later step runs.
+
+inputs:
+  ref:
+    description: >-
+      Commit that carries the reviewed engine bundle — a base commit or a
+      dispatched commit, never a pull request's head.
+    required: true
+  engine:
+    description: Path of the vendored bundle inside that commit.
+    required: false
+    default: .docket/docket.mjs
+
+runs:
+  using: composite
+  steps:
+    # Holds no token: the gate job runs candidate commands right after this
+    # step, and anything in the environment here is readable by them for the
+    # rest of the job.
+    - shell: bash
+      env:
+        DOCKET_ENGINE_REF: ${{ inputs.ref }}
+        DOCKET_ENGINE: ${{ inputs.engine }}
+      run: |
+        set -euo pipefail
+        if ! git cat-file -e "$DOCKET_ENGINE_REF:$DOCKET_ENGINE" 2>/dev/null; then
+          echo "Commit $DOCKET_ENGINE_REF does not contain $DOCKET_ENGINE. Vendor the engine bundle into the repository first." >&2
+          exit 1
+        fi
+        git show "$DOCKET_ENGINE_REF:$DOCKET_ENGINE" > "$RUNNER_TEMP/docket.mjs"
+        # Printed so a run can be tied to one exact engine build.
+        sha256sum "$RUNNER_TEMP/docket.mjs"
+        echo "DOCKET=node $RUNNER_TEMP/docket.mjs" >> "$GITHUB_ENV"
