@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset
+	xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd"
+	name="Docket Apex"
+>
+	<description>
+		Minimum set of Apex rules that catch defects a reviewer cannot reliably
+		spot: injection, governor limits, silently swallowed failures.
+	</description>
+
+	<!-- Security: the only category where a miss reaches production data. -->
+	<rule ref="category/apex/security.xml/ApexSOQLInjection" />
+	<rule ref="category/apex/security.xml/ApexOpenRedirect" />
+	<rule ref="category/apex/security.xml/ApexInsecureEndpoint" />
+	<rule ref="category/apex/security.xml/ApexXSSFromURLParam" />
+	<rule ref="category/apex/security.xml/ApexSharingViolations" />
+
+	<!-- Error prone: hidden failures that pass a code review. -->
+	<rule ref="category/apex/errorprone.xml/EmptyCatchBlock" />
+	<rule ref="category/apex/errorprone.xml/AvoidHardcodingId" />
+	<rule ref="category/apex/errorprone.xml/AvoidDirectAccessTriggerMap" />
+	<rule ref="category/apex/errorprone.xml/MethodWithSameNameAsEnclosingClass" />
+
+	<!-- Performance: governor limits are a runtime failure, not a style issue. -->
+	<rule ref="category/apex/performance.xml/OperationWithLimitsInLoop" />
+
+	<!-- Best practices: the two that change how the org can be deployed. -->
+	<rule ref="category/apex/bestpractices.xml/ApexUnitTestClassShouldHaveAsserts" />
+	<rule ref="category/apex/bestpractices.xml/AvoidGlobalModifier" />
+</ruleset>

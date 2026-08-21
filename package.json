@@ -1,0 +1,22 @@
+{
+	"name": "docket",
+	"private": true,
+	"type": "module",
+	"engines": {
+		"node": ">=24"
+	},
+	"scripts": {
+		"format": "prettier --plugin=prettier-plugin-apex --check .",
+		"lint": "eslint .",
+		"test": "node --test '.github/scripts/**/*.test.mjs'"
+	},
+	"devDependencies": {
+		"@eslint/js": "10.0.1",
+		"eslint": "10.8.1",
+		"globals": "17.11.0",
+		"prettier": "3.9.6",
+		"prettier-plugin-apex": "2.3.0",
+		"typescript": "6.0.3",
+		"typescript-eslint": "8.67.0"
+	}
+}

@@ -1,0 +1,42 @@
+name: PMD
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  detect_code_changes:
+    uses: ./.github/workflows/detect-code-changes.yml
+
+  pmd:
+    needs: detect_code_changes
+    if: needs.detect_code_changes.outputs.has_apex_changes == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      # PMD 7 ships as an executable jar wrapper and needs a JRE on PATH.
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Test scripts
+        run: npm test
+
+      - name: Check changed Apex with PMD
+        env:
+          APEX_FILES: ${{ needs.detect_code_changes.outputs.apex_files }}
+        run: node .github/scripts/quality-gates/pmd/check.mjs
