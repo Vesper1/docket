@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import { createWorkspaceFixture } from '../../shared/testing/workspace-fixture.mjs';
+
 import { main, runEslint } from './check.mjs';
 
 test('runs the workspace ESLint without a shell and returns its status', () => {

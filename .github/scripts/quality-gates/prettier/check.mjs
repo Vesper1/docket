@@ -7,6 +7,7 @@ import {
 } from '../../shared/paths/code-files.mjs';
 import { resolveWorkspace } from '../../shared/paths/workspace.mjs';
 import { runNodeBinary } from '../../shared/spawn/command.mjs';
+
 import { buildPrettierArguments } from './arguments.mjs';
 
 const variableName = 'CODE_FILES';

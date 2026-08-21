@@ -1,0 +1,50 @@
+# Salesforce Code Analyzer configuration.
+#
+# Regenerate a fully commented template with every default:
+#   sf code-analyzer config --output-file code-analyzer.yml
+#
+# The gate selects rules by tag, never by listing rule names. The selectors live
+# in .github/scripts/quality-gates/code-analyzer/arguments.mjs and pick the
+# Security, Performance, ErrorProne, and BestPractices categories plus every
+# Flow rule. CodeStyle and Design are deliberately left out: formatting belongs
+# to Prettier, and complexity thresholds belong to a full-repository scan rather
+# than to a gate that only sees the changed files.
+
+ignores:
+  files:
+    - 'legacy/**'
+    - 'node_modules/**'
+    # Tool-managed content, not project source.
+    - '.agents/**'
+    - '.claude/**'
+
+rules:
+  regex:
+    # Prettier already owns whitespace, and it is the only tool that can fix it.
+    # Leaving these on makes two gates disagree about the same line.
+    NoTrailingWhitespace:
+      disabled: true
+    NoMixedIndentation:
+      disabled: true
+
+engines:
+  pmd:
+    file_extensions:
+      # PMD's JavaScript rules predate ES modules and read `export const` in a
+      # .mjs tooling script as a global variable. LWC components are always
+      # .js, so dropping the other two extensions keeps the LWC rules and loses
+      # only false positives. ESLint owns the rest of the JavaScript here.
+      javascript:
+        - .js
+
+  eslint:
+    eslint_config_file: eslint.config.mjs
+    # Code Analyzer otherwise layers `eslint:all` and `@typescript-eslint:all`
+    # on top of the project config, which turns every stylistic preference the
+    # project deliberately left off into a gate failure.
+    disable_javascript_base_config: true
+    disable_typescript_base_config: true
+    # The LWC base configuration treats any `node:` import as an Aura library,
+    # which every tooling script in this repository trips. Turn it back on when
+    # the repository actually contains a Lightning Web Component.
+    disable_lwc_base_config: true

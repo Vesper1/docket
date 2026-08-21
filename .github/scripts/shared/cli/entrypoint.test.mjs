@@ -5,8 +5,9 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 
-import { isEntrypoint } from './entrypoint.mjs';
 import { createWorkspaceFixture } from '../testing/workspace-fixture.mjs';
+
+import { isEntrypoint } from './entrypoint.mjs';
 
 const entrypointUrl = pathToFileURL(
 	join(import.meta.dirname, 'entrypoint.mjs'),
