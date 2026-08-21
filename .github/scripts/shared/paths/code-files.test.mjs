@@ -3,8 +3,9 @@ import { symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { parseCodeFiles, resolveCodeFiles } from './code-files.mjs';
 import { createWorkspaceFixture } from '../testing/workspace-fixture.mjs';
+
+import { parseCodeFiles, resolveCodeFiles } from './code-files.mjs';
 
 test('parses paths with spaces and shell metacharacters without changing them', () => {
 	const files = ['src/a class.cls', "src/special ; $(false) ' [code].ts"];

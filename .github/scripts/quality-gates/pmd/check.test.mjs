@@ -11,6 +11,7 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 
 import { createWorkspaceFixture } from '../../shared/testing/workspace-fixture.mjs';
+
 import { runApexPmd } from './check.mjs';
 
 const createPmdFixture = (className = 'Example.cls') =>
